@@ -1,0 +1,43 @@
+{
+  "display_information": {
+    "name": "WhatsApp Trial",
+    "description": "Trial of the WhatsApp inbox hosted on Convex. The on-prem app is separate.",
+    "background_color": "#128C7E"
+  },
+  "features": {
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": false,
+      "messages_tab_read_only_enabled": true
+    },
+    "bot_user": {
+      "display_name": "WhatsApp Trial",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history",
+        "channels:manage",
+        "chat:write",
+        "groups:history",
+        "groups:write",
+        "reactions:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "request_url": "https://fantastic-ox-585.convex.site/slack/events",
+      "bot_events": ["app_home_opened", "message.channels", "message.groups"]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://fantastic-ox-585.convex.site/slack/interactivity"
+    },
+    "org_deploy_enabled": true,
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

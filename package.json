@@ -1,0 +1,17 @@
+{
+  "name": "whatsapp-slack-convex",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Convex trial of the WhatsApp inbox. The on-prem Node app stays in ../ibgroup.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "deploy": "convex deploy"
+  },
+  "dependencies": {
+    "convex": "^1.46.0"
+  }
+}

@@ -55,6 +55,12 @@ export function createSlack(token, log = console) {
         throw err;
       }
     },
+    async channelInfo(channel, teamId) {
+      const body = { channel };
+      if (teamId) body.team_id = teamId;
+      const json = await api("conversations.info", body);
+      return json.channel;
+    },
     async listMemberIds(channel, teamId) {
       const members = new Set();
       let cursor;

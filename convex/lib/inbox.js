@@ -58,15 +58,42 @@ async function ensureMappedMembers(channelId, userIds, deps) {
   return { invited: missing, missing };
 }
 
+async function channelExists(channelId, deps) {
+  if (!channelId) return false;
+  try {
+    if (deps.slack.channelInfo) {
+      await deps.slack.channelInfo(channelId, deps.config.slackTeamId);
+      return true;
+    }
+    if (deps.slack.listMemberIds) {
+      await deps.slack.listMemberIds(channelId, deps.config.slackTeamId);
+      return true;
+    }
+    return true;
+  } catch (err) {
+    if (err.code === "channel_not_found") return false;
+    // missing_scope / other: assume maybe still valid; caller may fail later.
+    deps.log.error?.(`[bridge] channel probe failed: ${err.code || err.message}`);
+    return true;
+  }
+}
+
 async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origin }, deps) {
   const existing = await deps.store.getContact(phone);
   if (existing?.channel_id) {
-    await ensureMappedMembers(existing.channel_id, inviteUserIds, deps);
-    if (name && name !== existing.name) await deps.store.upsertContact(phone, { name });
-    if (!existing.assignee_user_id && assigneeUserId) {
-      await deps.store.upsertContact(phone, { assigneeUserId });
+    const ok = await channelExists(existing.channel_id, deps);
+    if (ok) {
+      await ensureMappedMembers(existing.channel_id, inviteUserIds, deps);
+      if (name && name !== existing.name) await deps.store.upsertContact(phone, { name });
+      if (!existing.assignee_user_id && assigneeUserId) {
+        await deps.store.upsertContact(phone, { assigneeUserId });
+      }
+      return await deps.store.getContact(phone);
     }
-    return await deps.store.getContact(phone);
+    deps.log.warn?.(
+      `[bridge] stale channel ${existing.channel_id} for ${maskPhone(phone)}; recreating`,
+    );
+    await deps.store.upsertContact(phone, { channelId: null });
   }
 
   const created = await deps.slack.createChannel({
@@ -190,18 +217,51 @@ async function onReceived(payload, deps) {
   try {
     await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
   } catch (err) {
-    deliveryResult = `post_failed:${err.code || err.message}`;
-    deps.log.error?.(`[bridge] slack post failed: ${err.code || err.message}`);
-    await logInbound(deps, {
-      phone,
-      status: "error",
-      timestamp: eventTs,
-      payload: payloadJson,
-      vendorName: routing.vendor.name,
-      employeeSlackIds: JSON.stringify(mappedIds),
-      deliveryResult,
-    });
-    throw err;
+    if (err.code === "channel_not_found" && contact.channel_id) {
+      deps.log.warn?.(
+        `[bridge] post channel_not_found ${contact.channel_id}; clearing and recreating`,
+      );
+      await deps.store.upsertContact(phone, { channelId: null });
+      contact = await ensureChannel(
+        phone,
+        {
+          name: view.name || routing.vendor.name,
+          inviteUserIds,
+          assigneeUserId: assignee,
+          origin: "inbound",
+        },
+        deps,
+      );
+      try {
+        await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
+      } catch (retryErr) {
+        deliveryResult = `post_failed:${retryErr.code || retryErr.message}`;
+        deps.log.error?.(`[bridge] slack post failed: ${retryErr.code || retryErr.message}`);
+        await logInbound(deps, {
+          phone,
+          status: "error",
+          timestamp: eventTs,
+          payload: payloadJson,
+          vendorName: routing.vendor.name,
+          employeeSlackIds: JSON.stringify(mappedIds),
+          deliveryResult,
+        });
+        throw retryErr;
+      }
+    } else {
+      deliveryResult = `post_failed:${err.code || err.message}`;
+      deps.log.error?.(`[bridge] slack post failed: ${err.code || err.message}`);
+      await logInbound(deps, {
+        phone,
+        status: "error",
+        timestamp: eventTs,
+        payload: payloadJson,
+        vendorName: routing.vendor.name,
+        employeeSlackIds: JSON.stringify(mappedIds),
+        deliveryResult,
+      });
+      throw err;
+    }
   }
 
   const saved = await deps.store.upsertContact(phone, {

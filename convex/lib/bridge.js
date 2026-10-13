@@ -47,10 +47,18 @@ export async function verifySlack(rawBody, timestamp, signature, secret, nowMs =
   return safeEqual(`v0=${digest}`, signature);
 }
 
+/**
+ * Canonical WhatsApp-style phone: digits only, no plus.
+ * Strips non-digits, drops one leading 0, prefixes 91 when 10 digits remain.
+ * Returns "" when the value cannot be normalized (treat as unmapped).
+ */
 export function normalizePhone(raw) {
   if (raw == null) return "";
-  const digits = String(raw).replace(/\D/g, "");
-  if (digits.length < 8 || digits.length > 15) return "";
+  let digits = String(raw).replace(/\D/g, "");
+  if (digits.startsWith("0")) digits = digits.slice(1);
+  if (digits.length === 10) digits = `91${digits}`;
+  // Already has a country code (e.g. 919755226079), or reject.
+  if (digits.length < 11 || digits.length > 15) return "";
   return digits;
 }
 

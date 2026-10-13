@@ -55,6 +55,25 @@ export function createSlack(token, log = console) {
         throw err;
       }
     },
+    async channelInfo(channel, teamId) {
+      const body = { channel };
+      if (teamId) body.team_id = teamId;
+      const json = await api("conversations.info", body);
+      return json.channel;
+    },
+    async listMemberIds(channel, teamId) {
+      const members = new Set();
+      let cursor;
+      do {
+        const body = { channel, limit: 200 };
+        if (teamId) body.team_id = teamId;
+        if (cursor) body.cursor = cursor;
+        const json = await api("conversations.members", body);
+        for (const id of json.members || []) members.add(id);
+        cursor = json.response_metadata?.next_cursor || "";
+      } while (cursor);
+      return members;
+    },
     async setPurpose(channel, purpose, teamId) {
       const body = { channel, purpose: String(purpose).slice(0, 250) };
       if (teamId) body.team_id = teamId;

@@ -48,9 +48,42 @@ export function createStore(path) {
       id INTEGER PRIMARY KEY CHECK (id = 1),
       idx INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS employees (
+      slack_user_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      email TEXT,
+      phone TEXT,
+      active INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS vendors (
+      phone TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS vendor_employee_mappings (
+      vendor_phone TEXT NOT NULL,
+      employee_slack_user_id TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (vendor_phone, employee_slack_user_id)
+    );
+    CREATE TABLE IF NOT EXISTS message_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone TEXT NOT NULL,
+      status TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      payload TEXT NOT NULL,
+      vendor_name TEXT,
+      employee_slack_ids TEXT,
+      delivery_result TEXT,
+      created_at INTEGER NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS claims_created ON claims(created_at);
     CREATE INDEX IF NOT EXISTS contacts_channel ON contacts(channel_id);
     CREATE INDEX IF NOT EXISTS outbound_phone ON outbound(phone, created_at);
+    CREATE INDEX IF NOT EXISTS message_logs_phone ON message_logs(phone, created_at);
   `);
   ensureColumn(db, "contacts", "assignee_user_id", "TEXT");
   ensureColumn(db, "contacts", "last_message", "TEXT");
@@ -118,6 +151,59 @@ export function createStore(path) {
     INSERT INTO round_robin (id, idx) VALUES (1, ?)
     ON CONFLICT(id) DO UPDATE SET idx = excluded.idx
   `);
+  // Keep prepared statements on the store object so node:sqlite does not GC-finalize them.
+  const sql = {
+    insertClaim,
+    deleteClaim,
+    pruneClaims,
+    selectContact,
+    selectChannel,
+    upsert,
+    insertOutbound,
+    selectOutbound,
+    selectLatestOutbound,
+    selectHome,
+    selectRota,
+    upsertRota,
+    upsertEmployeeStmt: db.prepare(`
+      INSERT INTO employees (slack_user_id, name, email, phone, active, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(slack_user_id) DO UPDATE SET
+        name = excluded.name,
+        email = excluded.email,
+        phone = excluded.phone,
+        active = excluded.active,
+        updated_at = excluded.updated_at
+    `),
+    upsertVendorStmt: db.prepare(`
+      INSERT INTO vendors (phone, name, active, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(phone) DO UPDATE SET
+        name = excluded.name,
+        active = excluded.active,
+        updated_at = excluded.updated_at
+    `),
+    upsertMappingStmt: db.prepare(`
+      INSERT INTO vendor_employee_mappings (vendor_phone, employee_slack_user_id, active, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(vendor_phone, employee_slack_user_id) DO UPDATE SET
+        active = excluded.active,
+        updated_at = excluded.updated_at
+    `),
+    selectVendor: db.prepare("SELECT * FROM vendors WHERE phone = ?"),
+    selectMappings: db.prepare(
+      "SELECT * FROM vendor_employee_mappings WHERE vendor_phone = ? AND active = 1",
+    ),
+    selectEmployee: db.prepare("SELECT * FROM employees WHERE slack_user_id = ?"),
+    insertMessageLog: db.prepare(`
+      INSERT INTO message_logs (
+        phone, status, timestamp, payload, vendor_name, employee_slack_ids, delivery_result, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `),
+    selectMessageLogs: db.prepare(
+      "SELECT * FROM message_logs WHERE phone = ? ORDER BY created_at DESC",
+    ),
+  };
 
   function mapContact(row) {
     if (!row) return null;
@@ -125,7 +211,7 @@ export function createStore(path) {
   }
 
   function writeContact(phone, patch) {
-    const prev = selectContact.get(phone);
+    const prev = sql.selectContact.get(phone);
     const row = {
       phone,
       name: patch.name !== undefined ? patch.name : prev?.name ?? null,
@@ -143,7 +229,7 @@ export function createStore(path) {
       origin: patch.origin !== undefined ? patch.origin : prev?.origin ?? null,
       updated_at: Date.now(),
     };
-    upsert.run(
+    sql.upsert.run(
       row.phone,
       row.name,
       row.channel_id,
@@ -156,25 +242,27 @@ export function createStore(path) {
       row.origin,
       row.updated_at,
     );
-    return mapContact(selectContact.get(phone));
+    return mapContact(sql.selectContact.get(phone));
   }
 
-  return {
+  const store = {
+    _db: db,
+    _sql: sql,
     claim(id) {
       if (!id) return true;
-      pruneClaims.run(Date.now() - WEEK_MS);
-      return insertClaim.run(id, Date.now()).changes === 1;
+      sql.pruneClaims.run(Date.now() - WEEK_MS);
+      return sql.insertClaim.run(id, Date.now()).changes === 1;
     },
     release(id) {
       if (!id) return;
-      deleteClaim.run(id);
+      sql.deleteClaim.run(id);
     },
     getContact(phone) {
-      return mapContact(selectContact.get(phone));
+      return mapContact(sql.selectContact.get(phone));
     },
     getByChannel(channelId) {
       if (!channelId) return null;
-      return mapContact(selectChannel.get(channelId));
+      return mapContact(sql.selectChannel.get(channelId));
     },
     upsertContact(phone, patch = {}) {
       return writeContact(phone, patch);
@@ -182,14 +270,14 @@ export function createStore(path) {
     nextAssignee(agentIds) {
       const agents = (agentIds || []).filter(Boolean);
       if (!agents.length) return null;
-      const current = selectRota.get()?.idx ?? 0;
+      const current = sql.selectRota.get()?.idx ?? 0;
       const chosen = agents[current % agents.length];
-      upsertRota.run((current + 1) % agents.length);
+      sql.upsertRota.run((current + 1) % agents.length);
       return chosen;
     },
     rememberOutbound(entry) {
       if (!entry?.wamid) return;
-      insertOutbound.run(
+      sql.insertOutbound.run(
         entry.wamid,
         entry.phone,
         entry.channelId ?? null,
@@ -204,13 +292,59 @@ export function createStore(path) {
     },
     getOutbound(wamid) {
       if (!wamid) return null;
-      return selectOutbound.get(wamid) ?? null;
+      return sql.selectOutbound.get(wamid) ?? null;
     },
     listHomeCards(userId, limit = 8) {
-      return selectHome.all(userId, userId, limit).map((row) => ({
+      return sql.selectHome.all(userId, userId, limit).map((row) => ({
         ...mapContact(row),
-        latest: selectLatestOutbound.get(row.phone) ?? null,
+        latest: sql.selectLatestOutbound.get(row.phone) ?? null,
       }));
     },
+    upsertEmployee({ slackUserId, name, email = null, phone = null, active = true }) {
+      sql.upsertEmployeeStmt.run(slackUserId, name, email, phone, active ? 1 : 0, Date.now());
+    },
+    upsertVendor({ phone, name, active = true }) {
+      sql.upsertVendorStmt.run(phone, name, active ? 1 : 0, Date.now());
+    },
+    upsertVendorEmployeeMapping({ vendorPhone, employeeSlackUserId, active = true }) {
+      sql.upsertMappingStmt.run(vendorPhone, employeeSlackUserId, active ? 1 : 0, Date.now());
+    },
+    getVendorRouting(phone) {
+      if (!phone) return null;
+      const vendor = sql.selectVendor.get(phone);
+      if (!vendor || !vendor.active) return null;
+      const employees = [];
+      for (const mapping of sql.selectMappings.all(phone)) {
+        const employee = sql.selectEmployee.get(mapping.employee_slack_user_id);
+        if (employee?.active) {
+          employees.push({
+            slack_user_id: employee.slack_user_id,
+            name: employee.name,
+            email: employee.email,
+            phone: employee.phone,
+          });
+        }
+      }
+      return {
+        vendor: { phone: vendor.phone, name: vendor.name },
+        employees,
+      };
+    },
+    logMessage(entry) {
+      sql.insertMessageLog.run(
+        entry.phone || "",
+        entry.status,
+        entry.timestamp,
+        entry.payload || "",
+        entry.vendorName ?? null,
+        entry.employeeSlackIds ?? null,
+        entry.deliveryResult ?? null,
+        Date.now(),
+      );
+    },
+    listMessageLogs(phone) {
+      return sql.selectMessageLogs.all(phone);
+    },
   };
+  return store;
 }

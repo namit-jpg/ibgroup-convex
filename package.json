@@ -9,7 +9,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "deploy": "convex deploy"
+    "deploy": "convex deploy",
+    "seed:routing": "node scripts/seed-vendor-routing.mjs"
   },
   "dependencies": {
     "convex": "^1.46.0"

@@ -20,8 +20,10 @@
       "bot": [
         "channels:history",
         "channels:manage",
+        "channels:read",
         "chat:write",
         "groups:history",
+        "groups:read",
         "groups:write",
         "reactions:write"
       ]

@@ -20,6 +20,17 @@ export function makeDeps(ctx) {
     getByChannel: (channelId) => ctx.runQuery(internal.store.getByChannel, { channelId: channelId || "" }),
     upsertContact: (phone, patch) => ctx.runMutation(internal.store.upsertContact, { phone, patch: defined(patch) }),
     nextAssignee: (agentIds) => ctx.runMutation(internal.store.nextAssignee, { agentIds: agentIds || [] }),
+    getVendorRouting: (phone) => ctx.runQuery(internal.store.getVendorRouting, { phone }),
+    logMessage: (entry) =>
+      ctx.runMutation(internal.store.logMessage, {
+        phone: entry.phone || "",
+        status: entry.status,
+        timestamp: entry.timestamp,
+        payload: entry.payload || "",
+        vendorName: entry.vendorName ?? null,
+        employeeSlackIds: entry.employeeSlackIds ?? null,
+        deliveryResult: entry.deliveryResult ?? null,
+      }),
     rememberOutbound: (entry) => {
       if (!entry?.wamid) return Promise.resolve();
       return ctx.runMutation(internal.store.rememberOutbound, {

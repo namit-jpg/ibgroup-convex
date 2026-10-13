@@ -38,6 +38,46 @@ export default defineSchema({
     .index("by_phone", ["phone", "createdAt"])
     .index("by_slack_user", ["slackUserId"]),
 
+  employees: defineTable({
+    slackUserId: v.string(),
+    name: v.string(),
+    email: nullableString,
+    phone: nullableString,
+    active: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_slack_user", ["slackUserId"])
+    .index("by_phone", ["phone"]),
+
+  vendors: defineTable({
+    phone: v.string(),
+    name: v.string(),
+    active: v.boolean(),
+    updatedAt: v.number(),
+  }).index("by_phone", ["phone"]),
+
+  vendorEmployeeMappings: defineTable({
+    vendorPhone: v.string(),
+    employeeSlackUserId: v.string(),
+    active: v.boolean(),
+    updatedAt: v.number(),
+  })
+    .index("by_vendor", ["vendorPhone"])
+    .index("by_vendor_employee", ["vendorPhone", "employeeSlackUserId"]),
+
+  messageLogs: defineTable({
+    phone: v.string(),
+    status: v.string(),
+    timestamp: v.number(),
+    payload: v.string(),
+    vendorName: nullableString,
+    employeeSlackIds: nullableString,
+    deliveryResult: nullableString,
+    createdAt: v.number(),
+  })
+    .index("by_phone", ["phone", "createdAt"])
+    .index("by_status", ["status", "createdAt"]),
+
   claims: defineTable({
     claimId: v.string(),
     createdAt: v.number(),

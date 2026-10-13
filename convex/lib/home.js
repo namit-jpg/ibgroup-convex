@@ -461,7 +461,7 @@ export function successModal({ name, rendered, channelId, handedOff }) {
 
 export async function publishHome(userId, deps) {
   if (!userId || !deps.slack.publishView) return;
-  const cards = deps.store.listHomeCards(userId, 8);
+  const cards = await deps.store.listHomeCards(userId, 8);
   await deps.slack.publishView(
     userId,
     buildHomeView({ cards, agentsConfigured: deps.config.agentUserIds.length > 0 }),

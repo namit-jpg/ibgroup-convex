@@ -239,3 +239,135 @@ export const nextAssignee = internalMutation({
     return chosen;
   },
 });
+
+export const getVendorRouting = internalQuery({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    if (!phone) return null;
+    const vendor = await ctx.db
+      .query("vendors")
+      .withIndex("by_phone", (q) => q.eq("phone", phone))
+      .unique();
+    if (!vendor || !vendor.active) return null;
+    const mappings = await ctx.db
+      .query("vendorEmployeeMappings")
+      .withIndex("by_vendor", (q) => q.eq("vendorPhone", phone))
+      .collect();
+    const employees = [];
+    for (const mapping of mappings) {
+      if (!mapping.active) continue;
+      const employee = await ctx.db
+        .query("employees")
+        .withIndex("by_slack_user", (q) => q.eq("slackUserId", mapping.employeeSlackUserId))
+        .unique();
+      if (employee?.active) {
+        employees.push({
+          slack_user_id: employee.slackUserId,
+          name: employee.name,
+          email: employee.email,
+          phone: employee.phone,
+        });
+      }
+    }
+    return {
+      vendor: { phone: vendor.phone, name: vendor.name },
+      employees,
+    };
+  },
+});
+
+export const logMessage = internalMutation({
+  args: {
+    phone: v.string(),
+    status: v.string(),
+    timestamp: v.number(),
+    payload: v.string(),
+    vendorName: v.optional(v.union(v.string(), v.null())),
+    employeeSlackIds: v.optional(v.union(v.string(), v.null())),
+    deliveryResult: v.optional(v.union(v.string(), v.null())),
+  },
+  handler: async (ctx, entry) => {
+    await ctx.db.insert("messageLogs", {
+      phone: entry.phone || "",
+      status: entry.status,
+      timestamp: entry.timestamp,
+      payload: entry.payload,
+      vendorName: entry.vendorName ?? null,
+      employeeSlackIds: entry.employeeSlackIds ?? null,
+      deliveryResult: entry.deliveryResult ?? null,
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const upsertEmployee = internalMutation({
+  args: {
+    slackUserId: v.string(),
+    name: v.string(),
+    email: v.optional(v.union(v.string(), v.null())),
+    phone: v.optional(v.union(v.string(), v.null())),
+    active: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const prev = await ctx.db
+      .query("employees")
+      .withIndex("by_slack_user", (q) => q.eq("slackUserId", args.slackUserId))
+      .unique();
+    const row = {
+      slackUserId: args.slackUserId,
+      name: args.name,
+      email: args.email ?? prev?.email ?? null,
+      phone: args.phone ?? prev?.phone ?? null,
+      active: args.active !== undefined ? args.active : prev?.active ?? true,
+      updatedAt: Date.now(),
+    };
+    if (prev) await ctx.db.patch(prev._id, row);
+    else await ctx.db.insert("employees", row);
+  },
+});
+
+export const upsertVendor = internalMutation({
+  args: {
+    phone: v.string(),
+    name: v.string(),
+    active: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const prev = await ctx.db
+      .query("vendors")
+      .withIndex("by_phone", (q) => q.eq("phone", args.phone))
+      .unique();
+    const row = {
+      phone: args.phone,
+      name: args.name,
+      active: args.active !== undefined ? args.active : prev?.active ?? true,
+      updatedAt: Date.now(),
+    };
+    if (prev) await ctx.db.patch(prev._id, row);
+    else await ctx.db.insert("vendors", row);
+  },
+});
+
+export const upsertVendorEmployeeMapping = internalMutation({
+  args: {
+    vendorPhone: v.string(),
+    employeeSlackUserId: v.string(),
+    active: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const prev = await ctx.db
+      .query("vendorEmployeeMappings")
+      .withIndex("by_vendor_employee", (q) =>
+        q.eq("vendorPhone", args.vendorPhone).eq("employeeSlackUserId", args.employeeSlackUserId),
+      )
+      .unique();
+    const row = {
+      vendorPhone: args.vendorPhone,
+      employeeSlackUserId: args.employeeSlackUserId,
+      active: args.active !== undefined ? args.active : prev?.active ?? true,
+      updatedAt: Date.now(),
+    };
+    if (prev) await ctx.db.patch(prev._id, row);
+    else await ctx.db.insert("vendorEmployeeMappings", row);
+  },
+});

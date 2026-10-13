@@ -32,9 +32,21 @@ npx convex env set --prod SLACK_AGENT_USER_IDS 'U123,U456'
 
 Slack's bot token and signing secret are already set. Open **WhatsApp Trial → Home** in the Warpdrive demo Sandbox workspace.
 
+## Vendor → employee routing
+
+Inbound WhatsApp messages are delivered only to Slack users mapped to the sender's vendor number. Edit `data/vendor-routing.json`, then upsert (idempotent, safe to re-run):
+
+```bash
+npm run seed:routing
+npm run seed:routing -- --prod
+```
+
+Unmapped or invalid sender numbers are stored in `messageLogs` with status `unmapped` and do not post to Slack (the webhook still returns 200).
+
 ## Deploy again
 
 ```bash
 npm test
 npx convex deploy
+npm run seed:routing -- --prod
 ```

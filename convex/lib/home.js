@@ -75,8 +75,8 @@ export function buildHomeView({ cards = [], agentsConfigured = false }) {
         {
           type: "mrkdwn",
           text: agentsConfigured
-            ? "A customer who messages first is given to the next person on the rota. A chat you start stays with you, unless you hand the reply to the next person."
-            : "Add Slack member IDs to SLACK_AGENT_USER_IDS so a customer who messages first is handed to someone automatically.",
+            ? "Everyone on SLACK_AGENT_USER_IDS is added to each WhatsApp channel. A customer who messages first is given to the next person on the rota. A chat you start stays with you, unless you hand the reply to the next person."
+            : "Add Slack member IDs to SLACK_AGENT_USER_IDS so they are invited to every WhatsApp channel and a customer who messages first is handed to someone automatically.",
         },
       ],
     },

@@ -41,7 +41,7 @@ async function inviteAll(channelId, userIds, deps) {
 async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origin }, deps) {
   const existing = await deps.store.getContact(phone);
   if (existing?.channel_id) {
-    const newcomers = inviteUserIds.filter((id) => id && id !== existing.assignee_user_id);
+    const newcomers = (inviteUserIds || []).filter((id) => id && id !== existing.assignee_user_id);
     await inviteAll(existing.channel_id, newcomers, deps);
     if (name && name !== existing.name) await deps.store.upsertContact(phone, { name });
     if (!existing.assignee_user_id && assigneeUserId) {
@@ -62,7 +62,9 @@ async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origi
     assigneeUserId: assigneeUserId || null,
     origin,
   });
-  await inviteAll(channelId, inviteUserIds, deps);
+  // Everyone on SLACK_AGENT_USER_IDS joins every newly created WhatsApp channel.
+  const inviteList = [...(deps.config.agentUserIds || []), ...(inviteUserIds || [])];
+  await inviteAll(channelId, inviteList, deps);
   await deps.slack.setPurpose?.(channelId, `WhatsApp +${phone}`, deps.config.slackTeamId);
   const who = name || "WhatsApp contact";
   const intro = origin === "inbound"

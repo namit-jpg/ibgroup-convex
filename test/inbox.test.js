@@ -68,8 +68,17 @@ test("inbound WhatsApp opens a private channel and rotates the assignee", async 
 
   assert.equal(channels.length, 2);
   assert.equal(channels[0].name, "wa-deepu-5678");
-  assert.deepEqual(invites[0], { channel: "C_1", user: "U_A" });
-  assert.deepEqual(invites[1], { channel: "C_2", user: "U_B" });
+  // Every agent on SLACK_AGENT_USER_IDS is invited; assignee still rotates U_A → U_B.
+  assert.deepEqual(
+    invites.filter((invite) => invite.channel === "C_1").map((invite) => invite.user),
+    ["U_A", "U_B"],
+  );
+  assert.deepEqual(
+    invites.filter((invite) => invite.channel === "C_2").map((invite) => invite.user),
+    ["U_A", "U_B"],
+  );
+  assert.equal(deps.store.getContact("919812345678").assignee_user_id, "U_A");
+  assert.equal(deps.store.getContact("919800000001").assignee_user_id, "U_B");
   assert.equal(posts.filter((post) => post.channel === "C_1").length, 3);
   assert.match(posts[0].text, /this one is yours/);
   assert.match(posts[1].text, /Hello/);
@@ -150,12 +159,15 @@ test("outbound from Home sends the template and adds the sender to the channel",
     variables: ["Priya", "#44"],
   });
   assert.equal(channels.length, 1);
-  assert.deepEqual(invites, [{ channel: result.channelId, user: "U_ME" }]);
+  assert.deepEqual(
+    invites.map((invite) => invite.user),
+    ["U_A", "U_B", "U_ME"],
+  );
   assert.match(posts.at(-1).text, /Hi Priya, your order #44 is confirmed/);
   assert.equal(deps.store.getContact("919812345678").assignee_user_id, "U_ME");
 });
 
-test("handing the reply to the rota invites that person and the sender", async () => {
+test("handing the reply to the rota invites agents, assignee, and the sender", async () => {
   const { deps, invites } = harness();
   const result = await startOutbound(
     {
@@ -180,7 +192,7 @@ test("handing the reply to the rota invites that person and the sender", async (
   assert.equal(result.assigneeUserId, "U_A");
   assert.deepEqual(
     invites.map((invite) => invite.user),
-    ["U_A", "U_DESK"],
+    ["U_A", "U_B", "U_DESK"],
   );
 });
 

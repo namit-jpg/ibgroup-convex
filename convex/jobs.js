@@ -19,6 +19,7 @@ export const onSlackEvent = internalAction({
     const deps = makeDeps(ctx);
     const event = body.event || {};
     if (event.type === "app_home_opened") {
+      console.log(`[bridge] app_home_opened user=${event.user}`);
       await publishHome(event.user, deps);
       return;
     }

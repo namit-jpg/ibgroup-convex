@@ -27,10 +27,10 @@ The signing secret Sendvise shows, and the API key, still have to be saved on th
 ```bash
 npx convex env set --prod SENDVISE_API_KEY 'sv_live_…'
 npx convex env set --prod SENDVISE_WEBHOOK_SECRET 'the secret Sendvise shows'
-npx convex env set --prod SLACK_AGENT_USER_IDS 'U0C7QNBPY66,<your-slack-user-id>'
+npx convex env set --prod SLACK_AGENT_USER_IDS 'U0C7QNBPY66,U0C8W8LBSE4'
 ```
 
-Everyone listed in `SLACK_AGENT_USER_IDS` is invited to every WhatsApp channel the app opens (Akshat is `U0C7QNBPY66`). Open the WhatsApp Trial Home tab once, then check Convex logs for `app_home_opened user=…` to find your own member ID and add it to that list.
+Everyone listed in `SLACK_AGENT_USER_IDS` is invited to every WhatsApp channel the app opens. Default agents: Akshat (`U0C7QNBPY66`) and Namit (`U0C8W8LBSE4`).
 
 Slack's bot token and signing secret are already set. Open **WhatsApp Trial → Home** in the Warpdrive demo Sandbox workspace.
 

@@ -27,14 +27,28 @@ The signing secret Sendvise shows, and the API key, still have to be saved on th
 ```bash
 npx convex env set --prod SENDVISE_API_KEY 'sv_live_…'
 npx convex env set --prod SENDVISE_WEBHOOK_SECRET 'the secret Sendvise shows'
-npx convex env set --prod SLACK_AGENT_USER_IDS 'U123,U456'
+npx convex env set --prod SLACK_AGENT_USER_IDS 'U0C7QNBPY66,U0C8W8LBSE4'
 ```
 
-Slack's bot token and signing secret are already set. Open **WhatsApp Trial → Home** in the Warpdrive demo Sandbox workspace.
+`SLACK_AGENT_USER_IDS` are invited to every WhatsApp channel **in addition to** the vendor→employee mapping (not instead of it). Current always-on members: Akshat (`U0C7QNBPY66`) and Namit (`U0C8W8LBSE4`).
+
+Slack's bot token and signing secret are already set. Open **WhatsApp Trial → Home** in the IB Group workspace.
+
+## Vendor → employee routing
+
+Inbound WhatsApp messages invite Slack users mapped to the sender's vendor number (plus anyone in `SLACK_AGENT_USER_IDS`). Edit `data/vendor-routing.json`, then upsert (idempotent, safe to re-run):
+
+```bash
+npm run seed:routing
+npm run seed:routing -- --prod
+```
+
+Unknown vendor numbers still open/post to a Slack channel (mapped employees are invited when a mapping exists; `SLACK_AGENT_USER_IDS` are always invited). Only invalid phones stay `unmapped` in `messageLogs` with no Slack post.
 
 ## Deploy again
 
 ```bash
 npm test
 npx convex deploy
+npm run seed:routing -- --prod
 ```

@@ -1,0 +1,66 @@
+{
+  "employees": [
+    {
+      "slack_user_id": "U0C9D7X4S2C",
+      "name": "Mukesh Mishra",
+      "email": "mukesh.mishra@ibgroup.co.in",
+      "phone": "919755226079",
+      "active": true
+    },
+    {
+      "slack_user_id": "U0C9D7WCVEU",
+      "name": "Tarun Chicheriya",
+      "email": "tarun.chicheriya@ibgroup.co.in",
+      "phone": "917880103410",
+      "active": true
+    },
+    {
+      "slack_user_id": "U0C8LQA1065",
+      "name": "Twinkle Das",
+      "email": "twinkle.das@ibgroup.co.in",
+      "phone": "919201775427",
+      "active": true
+    },
+    {
+      "slack_user_id": "U0C8JM45BT4",
+      "name": "Avinash Ghidora",
+      "email": "avinash.ghidora@ibgroup.co.in",
+      "phone": "919201981475",
+      "active": true
+    }
+  ],
+  "vendors": [
+    {
+      "name": "Namit",
+      "phone": "918123400602",
+      "active": true
+    },
+    {
+      "name": "Akshat",
+      "phone": "917000092007",
+      "active": true
+    }
+  ],
+  "mappings": [
+    {
+      "vendor_phone": "918123400602",
+      "employee_slack_user_id": "U0C9D7X4S2C",
+      "active": true
+    },
+    {
+      "vendor_phone": "918123400602",
+      "employee_slack_user_id": "U0C9D7WCVEU",
+      "active": true
+    },
+    {
+      "vendor_phone": "917000092007",
+      "employee_slack_user_id": "U0C8LQA1065",
+      "active": true
+    },
+    {
+      "vendor_phone": "917000092007",
+      "employee_slack_user_id": "U0C8JM45BT4",
+      "active": true
+    }
+  ]
+}

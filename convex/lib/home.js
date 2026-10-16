@@ -75,8 +75,8 @@ export function buildHomeView({ cards = [], agentsConfigured = false }) {
         {
           type: "mrkdwn",
           text: agentsConfigured
-            ? "A customer who messages first is given to the next person on the rota. A chat you start stays with you, unless you hand the reply to the next person."
-            : "Add Slack member IDs to SLACK_AGENT_USER_IDS so a customer who messages first is handed to someone automatically.",
+            ? "Mapped vendor employees are invited first. Everyone on SLACK_AGENT_USER_IDS is also added to each WhatsApp channel."
+            : "Vendor routing invites mapped employees. Optionally add Slack member IDs to SLACK_AGENT_USER_IDS so those people are also added to every channel.",
         },
       ],
     },
@@ -461,9 +461,15 @@ export function successModal({ name, rendered, channelId, handedOff }) {
 
 export async function publishHome(userId, deps) {
   if (!userId || !deps.slack.publishView) return;
-  const cards = deps.store.listHomeCards(userId, 8);
-  await deps.slack.publishView(
-    userId,
-    buildHomeView({ cards, agentsConfigured: deps.config.agentUserIds.length > 0 }),
-  );
+  try {
+    const cards = await deps.store.listHomeCards(userId, 8);
+    await deps.slack.publishView(
+      userId,
+      buildHomeView({ cards, agentsConfigured: deps.config.agentUserIds.length > 0 }),
+    );
+    deps.log?.info?.(`[bridge] home published user=${userId}`);
+  } catch (err) {
+    deps.log?.error?.(`[bridge] home publish failed user=${userId}: ${err.code || err.message}`);
+    throw err;
+  }
 }

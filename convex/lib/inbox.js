@@ -38,16 +38,65 @@ async function inviteAll(channelId, userIds, deps) {
   }
 }
 
+async function ensureMappedMembers(channelId, userIds, deps) {
+  const wanted = [...new Set(userIds.filter(Boolean))];
+  if (!wanted.length) return { invited: [], missing: [] };
+
+  let memberIds = null;
+  if (deps.slack.listMemberIds) {
+    try {
+      memberIds = await deps.slack.listMemberIds(channelId, deps.config.slackTeamId);
+    } catch (err) {
+      deps.log.error?.(`[bridge] members list failed: ${err.code || err.message}`);
+    }
+  }
+
+  const missing = memberIds
+    ? wanted.filter((id) => !memberIds.has(id))
+    : wanted;
+  await inviteAll(channelId, missing, deps);
+  return { invited: missing, missing };
+}
+
+async function channelExists(channelId, deps) {
+  if (!channelId) return false;
+  try {
+    if (deps.slack.channelInfo) {
+      await deps.slack.channelInfo(channelId, deps.config.slackTeamId);
+      return true;
+    }
+    if (deps.slack.listMemberIds) {
+      await deps.slack.listMemberIds(channelId, deps.config.slackTeamId);
+      return true;
+    }
+    return true;
+  } catch (err) {
+    if (err.code === "channel_not_found") return false;
+    // missing_scope / other: assume maybe still valid; caller may fail later.
+    deps.log.error?.(`[bridge] channel probe failed: ${err.code || err.message}`);
+    return true;
+  }
+}
+
 async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origin }, deps) {
+  // Always also invite SLACK_AGENT_USER_IDS (e.g. Akshat + Namit) on top of
+  // vendor-mapped employees — additive, does not replace the mapping.
+  const inviteList = [...(inviteUserIds || []), ...(deps.config.agentUserIds || [])];
   const existing = await deps.store.getContact(phone);
   if (existing?.channel_id) {
-    const newcomers = inviteUserIds.filter((id) => id && id !== existing.assignee_user_id);
-    await inviteAll(existing.channel_id, newcomers, deps);
-    if (name && name !== existing.name) await deps.store.upsertContact(phone, { name });
-    if (!existing.assignee_user_id && assigneeUserId) {
-      await deps.store.upsertContact(phone, { assigneeUserId });
+    const ok = await channelExists(existing.channel_id, deps);
+    if (ok) {
+      await ensureMappedMembers(existing.channel_id, inviteList, deps);
+      if (name && name !== existing.name) await deps.store.upsertContact(phone, { name });
+      if (!existing.assignee_user_id && assigneeUserId) {
+        await deps.store.upsertContact(phone, { assigneeUserId });
+      }
+      return await deps.store.getContact(phone);
     }
-    return await deps.store.getContact(phone);
+    deps.log.warn?.(
+      `[bridge] stale channel ${existing.channel_id} for ${maskPhone(phone)}; recreating`,
+    );
+    await deps.store.upsertContact(phone, { channelId: null });
   }
 
   const created = await deps.slack.createChannel({
@@ -62,7 +111,7 @@ async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origi
     assigneeUserId: assigneeUserId || null,
     origin,
   });
-  await inviteAll(channelId, inviteUserIds, deps);
+  await ensureMappedMembers(channelId, inviteList, deps);
   await deps.slack.setPurpose?.(channelId, `WhatsApp +${phone}`, deps.config.slackTeamId);
   const who = name || "WhatsApp contact";
   const intro = origin === "inbound"
@@ -72,42 +121,162 @@ async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origi
   return await deps.store.getContact(phone);
 }
 
-async function assigneeForNewInbound(existing, deps) {
+async function logInbound(deps, entry) {
+  if (!deps.store.logMessage) return;
+  try {
+    await deps.store.logMessage(entry);
+  } catch (err) {
+    deps.log.error?.(`[bridge] message log failed: ${err.message}`);
+  }
+}
+
+function assigneeForMappedInbound(existing, employees, agentUserIds) {
+  // Outbound-first: keep the Slack user who sent the template.
   if (existing?.assignee_user_id) return existing.assignee_user_id;
-  if (existing?.channel_id) return null;
-  return await deps.store.nextAssignee(deps.config.agentUserIds);
+  // Pure inbound: mapped employee if any, otherwise first default agent.
+  return employees[0]?.slack_user_id || agentUserIds?.[0] || null;
 }
 
 async function onReceived(payload, deps) {
   const data = payload.data || {};
+  const rawPhone = data.contact?.phone || data.phone || data.from || data.to || "";
   const phone = phoneFrom(data);
+  const eventTs = eventTimeSeconds(payload.timestamp);
+  const payloadJson = JSON.stringify(payload).slice(0, 20_000);
+
   if (!phone) {
-    deps.log.warn?.("[bridge] message.received without a phone");
+    deps.log.warn?.(`[bridge] inbound unmapped: invalid phone (${rawPhone || "missing"})`);
+    await logInbound(deps, {
+      phone: String(rawPhone || ""),
+      status: "unmapped",
+      timestamp: eventTs,
+      payload: payloadJson,
+      deliveryResult: "invalid_phone",
+    });
     return;
   }
+
+  const routing = deps.store.getVendorRouting
+    ? await deps.store.getVendorRouting(phone)
+    : null;
+  const employees = routing?.employees || [];
+  const vendorName = routing?.vendor?.name || null;
+  if (!routing?.vendor || !employees.length) {
+    const reason = !routing?.vendor ? "unknown_vendor" : "no_mapped_employees";
+    deps.log.info?.(
+      `[bridge] inbound ${maskPhone(phone)} reason=${reason}; posting to Slack anyway`,
+    );
+  }
+
   const existing = await deps.store.getContact(phone);
   const view = formatInbound(data);
-  const assignee = await assigneeForNewInbound(existing, deps);
-  const contact = await ensureChannel(
-    phone,
-    {
-      name: view.name,
-      inviteUserIds: assignee ? [assignee] : [],
-      assigneeUserId: assignee,
-      origin: "inbound",
-    },
-    deps,
+  const mappedIds = employees.map((employee) => employee.slack_user_id);
+  const assignee = assigneeForMappedInbound(existing, employees, deps.config.agentUserIds);
+  const inviteUserIds = [...mappedIds];
+  // Keep the outbound starter in the channel even if they are not on the map.
+  if (assignee && !inviteUserIds.includes(assignee)) inviteUserIds.push(assignee);
+
+  deps.log.info?.(
+    `[bridge] inbound ${maskPhone(phone)} vendor=${vendorName || "unmapped"} employees=${mappedIds.join(",") || "(none)"}`,
   );
+
+  let contact;
+  try {
+    contact = await ensureChannel(
+      phone,
+      {
+        name: view.name || vendorName,
+        inviteUserIds,
+        assigneeUserId: assignee,
+        origin: "inbound",
+      },
+      deps,
+    );
+  } catch (err) {
+    deps.log.error?.(`[bridge] channel ensure failed: ${err.code || err.message}`);
+    await logInbound(deps, {
+      phone,
+      status: "error",
+      timestamp: eventTs,
+      payload: payloadJson,
+      vendorName,
+      employeeSlackIds: JSON.stringify(mappedIds),
+      deliveryResult: `channel_failed:${err.code || err.message}`,
+    });
+    throw err;
+  }
+
   const rendered = renderInbound(view);
-  await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
+  let deliveryResult = "posted";
+  try {
+    await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
+  } catch (err) {
+    if (err.code === "channel_not_found" && contact.channel_id) {
+      deps.log.warn?.(
+        `[bridge] post channel_not_found ${contact.channel_id}; clearing and recreating`,
+      );
+      await deps.store.upsertContact(phone, { channelId: null });
+      contact = await ensureChannel(
+        phone,
+        {
+          name: view.name || vendorName,
+          inviteUserIds,
+          assigneeUserId: assignee,
+          origin: "inbound",
+        },
+        deps,
+      );
+      try {
+        await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
+      } catch (retryErr) {
+        deliveryResult = `post_failed:${retryErr.code || retryErr.message}`;
+        deps.log.error?.(`[bridge] slack post failed: ${retryErr.code || retryErr.message}`);
+        await logInbound(deps, {
+          phone,
+          status: "error",
+          timestamp: eventTs,
+          payload: payloadJson,
+          vendorName: vendorName,
+          employeeSlackIds: JSON.stringify(mappedIds),
+          deliveryResult,
+        });
+        throw retryErr;
+      }
+    } else {
+      deliveryResult = `post_failed:${err.code || err.message}`;
+      deps.log.error?.(`[bridge] slack post failed: ${err.code || err.message}`);
+      await logInbound(deps, {
+        phone,
+        status: "error",
+        timestamp: eventTs,
+        payload: payloadJson,
+        vendorName,
+        employeeSlackIds: JSON.stringify(mappedIds),
+        deliveryResult,
+      });
+      throw err;
+    }
+  }
+
   const saved = await deps.store.upsertContact(phone, {
-    name: view.name,
+    name: view.name || vendorName,
     conversationId: data.conversation_id != null ? String(data.conversation_id) : undefined,
-    lastInboundAt: eventTimeSeconds(payload.timestamp),
+    lastInboundAt: eventTs,
     lastMessage: view.body,
     lastDirection: "in",
   });
-  deps.log.info?.(`[bridge] inbound ${maskPhone(phone)}`);
+  await logInbound(deps, {
+    phone,
+    status: "delivered",
+    timestamp: eventTs,
+    payload: payloadJson,
+    vendorName,
+    employeeSlackIds: JSON.stringify(mappedIds),
+    deliveryResult,
+  });
+  deps.log.info?.(
+    `[bridge] inbound delivered ${maskPhone(phone)} vendor=${vendorName || "unmapped"} channel=${contact.channel_id} result=${deliveryResult}`,
+  );
   await refreshHome(saved.assignee_user_id, deps);
 }
 

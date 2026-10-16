@@ -107,6 +107,7 @@ export const slackInteractivity = httpAction(async (ctx, request) => {
     const parsed = readDetails(payload.view);
     const errors = validateDetails(parsed);
     if (errors) return json({ response_action: "errors", errors });
+    console.log(`[bridge] send_outbound user=${payload.user.id}`);
     await ctx.scheduler.runAfter(0, internal.jobs.finishSend, {
       viewId: payload.view.id,
       userId: payload.user.id,

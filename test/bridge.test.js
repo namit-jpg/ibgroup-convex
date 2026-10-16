@@ -38,8 +38,13 @@ test("verifySlack uses the v0 base string", async () => {
 });
 
 test("normalizePhone and channel names stay Slack-safe", () => {
+  assert.equal(normalizePhone("+91 97552 26079"), "919755226079");
+  assert.equal(normalizePhone("09755226079"), "919755226079");
+  assert.equal(normalizePhone("9755226079"), "919755226079");
+  assert.equal(normalizePhone("919755226079"), "919755226079");
   assert.equal(normalizePhone("+91 98123 45678"), "919812345678");
   assert.equal(normalizePhone("123"), "");
+  assert.equal(normalizePhone("975522607"), "");
   assert.equal(channelName("Priya Sharma", "919812345678"), "wa-priya-sharma-5678");
   assert.equal(channelName("", "919800000000"), "wa-contact-0000");
 });

@@ -43,7 +43,7 @@ npm run seed:routing
 npm run seed:routing -- --prod
 ```
 
-Unmapped or invalid sender numbers are stored in `messageLogs` with status `unmapped` and do not post to Slack (the webhook still returns 200).
+Unknown vendor numbers still open/post to a Slack channel (mapped employees are invited when a mapping exists; `SLACK_AGENT_USER_IDS` are always invited). Only invalid phones stay `unmapped` in `messageLogs` with no Slack post.
 
 ## Deploy again
 

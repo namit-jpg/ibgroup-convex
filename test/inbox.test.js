@@ -149,14 +149,15 @@ test("SLACK_AGENT_USER_IDS are invited in addition to mapped employees", async (
   );
 });
 
-test("unmapped or invalid sender is logged and does not post to Slack", async () => {
+test("unmapped sender still opens a Slack channel; invalid phone stays unmapped", async () => {
   const { deps, posts, channels, store } = harness();
   await handleSendvise(inbound("+919999999999", "Hello", "Unknown"), "del-u1", deps);
   await handleSendvise(inbound("123", "Nope", "Bad"), "del-u2", deps);
 
-  assert.equal(channels.length, 0);
-  assert.equal(posts.length, 0);
-  assert.equal(store.listMessageLogs("919999999999")[0].status, "unmapped");
+  assert.equal(channels.length, 1);
+  assert.equal(channels[0].name, "wa-unknown-9999");
+  assert.equal(store.listMessageLogs("919999999999")[0].status, "delivered");
+  assert.match(posts.at(-1).text, /Hello/);
   assert.equal(store.listMessageLogs("123")[0].status, "unmapped");
 });
 

@@ -130,11 +130,11 @@ async function logInbound(deps, entry) {
   }
 }
 
-function assigneeForMappedInbound(existing, employees) {
+function assigneeForMappedInbound(existing, employees, agentUserIds) {
   // Outbound-first: keep the Slack user who sent the template.
   if (existing?.assignee_user_id) return existing.assignee_user_id;
-  // Pure inbound: one of the mapped employees (stable: first in mapping order).
-  return employees[0]?.slack_user_id || null;
+  // Pure inbound: mapped employee if any, otherwise first default agent.
+  return employees[0]?.slack_user_id || agentUserIds?.[0] || null;
 }
 
 async function onReceived(payload, deps) {
@@ -160,33 +160,24 @@ async function onReceived(payload, deps) {
     ? await deps.store.getVendorRouting(phone)
     : null;
   const employees = routing?.employees || [];
+  const vendorName = routing?.vendor?.name || null;
   if (!routing?.vendor || !employees.length) {
     const reason = !routing?.vendor ? "unknown_vendor" : "no_mapped_employees";
     deps.log.info?.(
-      `[bridge] inbound unmapped ${maskPhone(phone)} reason=${reason}`,
+      `[bridge] inbound ${maskPhone(phone)} reason=${reason}; posting to Slack anyway`,
     );
-    await logInbound(deps, {
-      phone,
-      status: "unmapped",
-      timestamp: eventTs,
-      payload: payloadJson,
-      vendorName: routing?.vendor?.name ?? null,
-      employeeSlackIds: "[]",
-      deliveryResult: reason,
-    });
-    return;
   }
 
   const existing = await deps.store.getContact(phone);
   const view = formatInbound(data);
   const mappedIds = employees.map((employee) => employee.slack_user_id);
-  const assignee = assigneeForMappedInbound(existing, employees);
+  const assignee = assigneeForMappedInbound(existing, employees, deps.config.agentUserIds);
   const inviteUserIds = [...mappedIds];
   // Keep the outbound starter in the channel even if they are not on the map.
   if (assignee && !inviteUserIds.includes(assignee)) inviteUserIds.push(assignee);
 
   deps.log.info?.(
-    `[bridge] inbound ${maskPhone(phone)} vendor=${routing.vendor.name} employees=${mappedIds.join(",")}`,
+    `[bridge] inbound ${maskPhone(phone)} vendor=${vendorName || "unmapped"} employees=${mappedIds.join(",") || "(none)"}`,
   );
 
   let contact;
@@ -194,7 +185,7 @@ async function onReceived(payload, deps) {
     contact = await ensureChannel(
       phone,
       {
-        name: view.name || routing.vendor.name,
+        name: view.name || vendorName,
         inviteUserIds,
         assigneeUserId: assignee,
         origin: "inbound",
@@ -208,7 +199,7 @@ async function onReceived(payload, deps) {
       status: "error",
       timestamp: eventTs,
       payload: payloadJson,
-      vendorName: routing.vendor.name,
+      vendorName,
       employeeSlackIds: JSON.stringify(mappedIds),
       deliveryResult: `channel_failed:${err.code || err.message}`,
     });
@@ -228,7 +219,7 @@ async function onReceived(payload, deps) {
       contact = await ensureChannel(
         phone,
         {
-          name: view.name || routing.vendor.name,
+          name: view.name || vendorName,
           inviteUserIds,
           assigneeUserId: assignee,
           origin: "inbound",
@@ -245,7 +236,7 @@ async function onReceived(payload, deps) {
           status: "error",
           timestamp: eventTs,
           payload: payloadJson,
-          vendorName: routing.vendor.name,
+          vendorName: vendorName,
           employeeSlackIds: JSON.stringify(mappedIds),
           deliveryResult,
         });
@@ -259,7 +250,7 @@ async function onReceived(payload, deps) {
         status: "error",
         timestamp: eventTs,
         payload: payloadJson,
-        vendorName: routing.vendor.name,
+        vendorName,
         employeeSlackIds: JSON.stringify(mappedIds),
         deliveryResult,
       });
@@ -268,7 +259,7 @@ async function onReceived(payload, deps) {
   }
 
   const saved = await deps.store.upsertContact(phone, {
-    name: view.name || routing.vendor.name,
+    name: view.name || vendorName,
     conversationId: data.conversation_id != null ? String(data.conversation_id) : undefined,
     lastInboundAt: eventTs,
     lastMessage: view.body,
@@ -279,12 +270,12 @@ async function onReceived(payload, deps) {
     status: "delivered",
     timestamp: eventTs,
     payload: payloadJson,
-    vendorName: routing.vendor.name,
+    vendorName,
     employeeSlackIds: JSON.stringify(mappedIds),
     deliveryResult,
   });
   deps.log.info?.(
-    `[bridge] inbound delivered ${maskPhone(phone)} vendor=${routing.vendor.name} channel=${contact.channel_id} result=${deliveryResult}`,
+    `[bridge] inbound delivered ${maskPhone(phone)} vendor=${vendorName || "unmapped"} channel=${contact.channel_id} result=${deliveryResult}`,
   );
   await refreshHome(saved.assignee_user_id, deps);
 }

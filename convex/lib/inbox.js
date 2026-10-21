@@ -308,6 +308,7 @@ async function prepareInbound(view, deps) {
       view: { ...view, file: null, link: "" },
       failedName: view.file.filename,
       sourceUrl: view.file.url || "",
+      reason: err.message,
     };
   }
 }
@@ -326,8 +327,9 @@ async function shareFile(channel, file, deps) {
   });
 }
 
-function missingFileText(filename, url) {
-  const line = `Couldn't show ${filename} in Slack.`;
+function missingFileText(filename, url, reason) {
+  const why = reason ? ` (${reason})` : "";
+  const line = `Couldn't show ${filename} in Slack${why}.`;
   return url ? `${line}\n${url}` : line;
 }
 
@@ -339,13 +341,16 @@ async function sharePrepared(channel, prepared, deps) {
       deps.log.error?.(`[bridge] slack upload failed: ${err.message}`);
       await deps.slack.postMessage({
         channel,
-        text: missingFileText(prepared.view.file.filename, prepared.view.file.url),
+        text: missingFileText(prepared.view.file.filename, prepared.view.file.url, err.message),
       });
     }
     return;
   }
   if (prepared.failedName) {
-    await deps.slack.postMessage({ channel, text: missingFileText(prepared.failedName, prepared.sourceUrl) });
+    await deps.slack.postMessage({
+      channel,
+      text: missingFileText(prepared.failedName, prepared.sourceUrl, prepared.reason),
+    });
   }
 }
 

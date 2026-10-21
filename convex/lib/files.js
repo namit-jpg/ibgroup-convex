@@ -145,6 +145,24 @@ function asBytes(bytes) {
   return null;
 }
 
+function hasAscii(bytes, text, limit = 65536) {
+  const needle = [];
+  for (let i = 0; i < text.length; i += 1) needle.push(text.charCodeAt(i));
+  const end = Math.min(bytes.length, limit);
+  if (end < needle.length) return false;
+  for (let i = 0; i <= end - needle.length; i += 1) {
+    let found = true;
+    for (let j = 0; j < needle.length; j += 1) {
+      if (bytes[i + j] !== needle[j]) {
+        found = false;
+        break;
+      }
+    }
+    if (found) return true;
+  }
+  return false;
+}
+
 export function sniffBytes(bytes) {
   const b = asBytes(bytes);
   if (!b?.byteLength) return null;
@@ -157,13 +175,11 @@ export function sniffBytes(bytes) {
   }
   if (startsWith(b, [0x42, 0x4d])) return { kind: "image", ext: "bmp" };
   if (startsWith(b, [0x50, 0x4b, 0x03, 0x04]) || startsWith(b, [0x50, 0x4b, 0x05, 0x06]) || startsWith(b, [0x50, 0x4b, 0x07, 0x08])) {
-    const head = new TextDecoder("latin1").decode(b.subarray(0, Math.min(b.length, 65536)));
-    if (/word\/|wordprocessingml/i.test(head)) return { kind: "document", ext: "docx" };
-    if (/xl\/|spreadsheetml/i.test(head)) return { kind: "document", ext: "xlsx" };
-    if (/ppt\/|presentationml/i.test(head)) return { kind: "document", ext: "pptx" };
+    if (hasAscii(b, "word/") || hasAscii(b, "wordprocessingml")) return { kind: "document", ext: "docx" };
+    if (hasAscii(b, "xl/") || hasAscii(b, "spreadsheetml")) return { kind: "document", ext: "xlsx" };
+    if (hasAscii(b, "ppt/") || hasAscii(b, "presentationml")) return { kind: "document", ext: "pptx" };
   }
-  const textHead = new TextDecoder("utf-8").decode(b.subarray(0, Math.min(b.length, 64)));
-  if (/BEGIN:VCARD/i.test(textHead)) return { kind: "contact", ext: "vcf" };
+  if (hasAscii(b, "BEGIN:VCARD", 256)) return { kind: "contact", ext: "vcf" };
   return null;
 }
 
@@ -177,7 +193,12 @@ function replaceExtension(name, ext, fallback) {
 }
 
 export function refineFileFromBytes(file, bytes) {
-  const sniffed = sniffBytes(bytes);
+  let sniffed = null;
+  try {
+    sniffed = sniffBytes(bytes);
+  } catch {
+    sniffed = null;
+  }
   if (!sniffed) return { ...file, bytes };
   return {
     ...file,
@@ -284,7 +305,7 @@ function captionOf(data) {
   if (!message) return "";
   const filename = filenameOf(data);
   const type = String(data.type || "").toLowerCase();
-  if (message === filename || message === `(${type})`) return "";
+  if (message === filename || message === `(${type})` || message === `[${type}]`) return "";
   return message;
 }
 

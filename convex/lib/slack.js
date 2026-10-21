@@ -1,19 +1,33 @@
+function slackError(method, json) {
+  const detail = Array.isArray(json.response_metadata?.messages)
+    ? json.response_metadata.messages.filter(Boolean).join("; ")
+    : "";
+  const err = new Error(`${method}: ${json.error || "failed"}${detail ? ` (${detail})` : ""}`);
+  err.code = json.error;
+  return err;
+}
+
+function formBody(params) {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null || value === "") continue;
+    body.set(key, String(value));
+  }
+  return body.toString();
+}
+
 export function createSlack(token, log = console) {
-  async function api(method, body) {
+  async function api(method, body, { form = false } = {}) {
     const res = await fetch(`https://slack.com/api/${method}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": form ? "application/x-www-form-urlencoded" : "application/json; charset=utf-8",
       },
-      body: JSON.stringify(body),
+      body: form ? formBody(body) : JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!json.ok) {
-      const err = new Error(`${method}: ${json.error || "failed"}`);
-      err.code = json.error;
-      throw err;
-    }
+    if (!json.ok) throw slackError(method, json);
     return json;
   }
 
@@ -38,11 +52,12 @@ export function createSlack(token, log = console) {
       };
     },
     async uploadFile({ channel, filename, title, bytes, altText }) {
+      // This method ignores a JSON body and then reports the required fields as missing.
       const started = await api("files.getUploadURLExternal", {
         filename,
         length: bytes.byteLength,
         ...(altText ? { alt_txt: String(altText).slice(0, 1000) } : {}),
-      });
+      }, { form: true });
       // Slack infers type from the filename. Office MIME types on this POST
       // make Word/Excel land as application/octet-stream (.bin) with no preview.
       const upload = await fetch(started.upload_url, {

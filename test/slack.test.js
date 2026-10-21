@@ -32,7 +32,10 @@ test("Slack file uploads send raw bytes as octet-stream so Word stays Word", asy
   }
 
   const started = calls.find((call) => call.href.endsWith("files.getUploadURLExternal"));
-  assert.equal(JSON.parse(started.opts.body).filename, "po.docx");
+  assert.match(started.opts.headers["Content-Type"], /application\/x-www-form-urlencoded/);
+  const startedBody = new URLSearchParams(started.opts.body);
+  assert.equal(startedBody.get("filename"), "po.docx");
+  assert.equal(startedBody.get("length"), "3");
   const posted = calls.find((call) => call.href === "https://files.slack.com/upload/v1/x");
   assert.equal(posted.opts.headers["Content-Type"], "application/octet-stream");
   assert.equal(posted.opts.body.byteLength, 3);

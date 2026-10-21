@@ -22,6 +22,8 @@ https://fantastic-ox-585.convex.site/webhooks/sendvise
 
 Subscribe that URL to `message.received`, `message.sent`, `opt_in`, `opt_out`, and `contact.created`.
 
+Images, PDF, Word (`.docx`), Excel (`.xlsx`), and WhatsApp contact cards (`.vcf`) go both ways. A file from WhatsApp is uploaded into the Slack channel, so the channel shows the file rather than a link. A file shared in that channel is sent on WhatsApp: pictures as pictures, documents as documents, and `.vcf` cards as contact cards. The Slack app needs the `files:read` and `files:write` scopes.
+
 The signing secret Sendvise shows, and the API key, still have to be saved on the Convex deployment. From this folder:
 
 ```bash

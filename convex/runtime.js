@@ -46,6 +46,33 @@ export function makeDeps(ctx) {
     store,
     sendvise,
     slack: createSlack(config.slackBotToken),
+    files: {
+      async fetch(url) {
+        if (!/^https:\/\//i.test(String(url || ""))) throw new Error("File link must be https");
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Could not download the file (${res.status})`);
+        return {
+          bytes: new Uint8Array(await res.arrayBuffer()),
+          contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
+        };
+      },
+      async publish(bytes, { contentType } = {}) {
+        const type = contentType || "application/octet-stream";
+        const uploadUrl = await ctx.runMutation(internal.store.makeUploadUrl, {});
+        const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        const res = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": type },
+          body: new Blob([body], { type }),
+        });
+        if (!res.ok) throw new Error(`Could not store the file (${res.status})`);
+        const stored = await res.json().catch(() => ({}));
+        if (!stored.storageId) throw new Error("Could not store the file");
+        const url = await ctx.runQuery(internal.store.publicFileUrl, { storageId: stored.storageId });
+        if (!url) throw new Error("Could not publish the file");
+        return url;
+      },
+    },
     templates: createTemplateSource(sendvise),
     config,
     log: console,

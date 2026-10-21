@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import test from "node:test";
 import {
+  captionWithoutFileLinks,
   channelName,
   formatInbound,
   headerNeeds,
   isHumanChannelMessage,
   normalizePhone,
+  renderInbound,
   renderTemplate,
   slackTextToPlain,
   templateVariables,
@@ -78,8 +80,73 @@ test("formatInbound keeps flow answers and location links", () => {
   assert.match(pin.body, /Phoenix Mall/);
 });
 
-test("channel messages ignore bots and thread replies", () => {
+test("supported files are described without a link", () => {
+  const sheet = formatInbound({
+    type: "document",
+    message: "October rates",
+    filename: "rates.xlsx",
+    mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    media_url: "https://cdn.example/rates.xlsx",
+    phone: "+919812345678",
+    contact: { name: "Deepu", phone: "+919812345678" },
+  });
+  assert.equal(sheet.link, "");
+  assert.equal(sheet.body, "October rates");
+  assert.equal(sheet.file.kind, "document");
+  assert.equal(sheet.file.ext, "xlsx");
+  assert.doesNotMatch(renderInbound(sheet).blocks[0].text.text, /cdn\.example/);
+
+  const photo = formatInbound({
+    type: "image",
+    message: "Gate photo",
+    mime_type: "image/png",
+    media_url: "https://cdn.example/gate.png",
+    phone: "+919812345678",
+    contact: { name: "Deepu", phone: "+919812345678" },
+  });
+  assert.equal(photo.file.kind, "image");
+  assert.equal(photo.file.filename, "gate.png");
+  assert.equal(photo.link, "");
+
+  const card = formatInbound({
+    type: "contacts",
+    phone: "+919812345678",
+    contact: { name: "Deepu", phone: "+919812345678" },
+    contacts: [
+      {
+        name: { formatted_name: "Ravi Kumar", first_name: "Ravi", last_name: "Kumar" },
+        phones: [{ phone: "+919800001111", type: "CELL" }],
+        emails: [{ email: "ravi@example.com" }],
+        org: { company: "Acme" },
+      },
+    ],
+  });
+  assert.match(card.body, /Ravi Kumar/);
+  assert.match(card.body, /\+919800001111/);
+  assert.match(card.body, /ravi@example.com/);
+  assert.match(card.file.vcf, /BEGIN:VCARD/);
+  assert.equal(card.link, "");
+  assert.doesNotMatch(renderInbound(card).blocks[0].text.text, /https?:/);
+
+  const clip = formatInbound({
+    type: "video",
+    message: "Walkthrough",
+    media_url: "https://cdn.example/walk.mp4",
+    phone: "+919812345678",
+  });
+  assert.equal(clip.file, null);
+  assert.equal(clip.link, "https://cdn.example/walk.mp4");
+});
+
+test("slack file permalinks are not sent as the caption", () => {
+  assert.equal(
+    captionWithoutFileLinks("see this <https://warpdrive.slack.com/files/U1/F1/rates.xlsx|rates.xlsx>"),
+    "see this",
+  );
   assert.equal(slackTextToPlain("see <https://example.com|docs>"), "see docs (https://example.com)");
+});
+
+test("channel messages ignore bots and thread replies", () => {
   assert.equal(
     isHumanChannelMessage({ channel: "C1", ts: "1.1", user: "U1", text: "hi" }),
     true,

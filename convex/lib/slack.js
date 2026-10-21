@@ -21,6 +21,39 @@ export function createSlack(token, log = console) {
     postMessage(args) {
       return api("chat.postMessage", { unfurl_links: true, unfurl_media: false, ...args });
     },
+    async download(url) {
+      let host = "";
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        throw new Error("Missing Slack file link");
+      }
+      const allowed = host === "files.slack.com" || host.endsWith(".slack.com") || host === "slack-files.com" || host.endsWith(".slack-files.com");
+      if (!allowed) throw new Error("Slack file link is not on Slack");
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Slack file download failed (${res.status})`);
+      return {
+        bytes: new Uint8Array(await res.arrayBuffer()),
+        contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
+      };
+    },
+    async uploadFile({ channel, filename, title, bytes, contentType, altText }) {
+      const started = await api("files.getUploadURLExternal", {
+        filename,
+        length: bytes.byteLength,
+        ...(altText ? { alt_txt: String(altText).slice(0, 1000) } : {}),
+      });
+      const upload = await fetch(started.upload_url, {
+        method: "POST",
+        headers: contentType ? { "Content-Type": contentType } : undefined,
+        body: bytes,
+      });
+      if (!upload.ok) throw new Error(`Slack file upload failed (${upload.status})`);
+      return api("files.completeUploadExternal", {
+        files: [{ id: started.file_id, title: title || filename }],
+        channel_id: channel,
+      });
+    },
     async addReaction(args) {
       try {
         await api("reactions.add", args);

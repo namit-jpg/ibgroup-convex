@@ -30,6 +30,18 @@ export function createSendvise({ apiKey, baseUrl, phoneNumberId }) {
         payload: { to, type: "text", text },
       });
     },
+    sendMedia(to, { type, mediaUrl, filename, caption } = {}) {
+      const payload = { to, type, media_url: mediaUrl };
+      if (filename) payload.filename = filename;
+      if (caption) payload.caption = caption;
+      return request("/v1/external/messages/send", { method: "POST", payload });
+    },
+    sendContacts(to, contacts) {
+      return request("/v1/external/messages/send", {
+        method: "POST",
+        payload: { to, type: "contacts", contacts },
+      });
+    },
     sendTemplate(to, templateName, variables, language, extras = {}) {
       const payload = { to, template_name: templateName, language };
       if (variables?.length) payload.variables = variables;

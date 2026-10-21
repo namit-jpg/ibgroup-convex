@@ -37,15 +37,17 @@ export function createSlack(token, log = console) {
         contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
       };
     },
-    async uploadFile({ channel, filename, title, bytes, contentType, altText }) {
+    async uploadFile({ channel, filename, title, bytes, altText }) {
       const started = await api("files.getUploadURLExternal", {
         filename,
         length: bytes.byteLength,
         ...(altText ? { alt_txt: String(altText).slice(0, 1000) } : {}),
       });
+      // Slack infers type from the filename. Office MIME types on this POST
+      // make Word/Excel land as application/octet-stream (.bin) with no preview.
       const upload = await fetch(started.upload_url, {
         method: "POST",
-        headers: contentType ? { "Content-Type": contentType } : undefined,
+        headers: { "Content-Type": "application/octet-stream" },
         body: bytes,
       });
       if (!upload.ok) throw new Error(`Slack file upload failed (${upload.status})`);

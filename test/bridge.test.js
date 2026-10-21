@@ -136,6 +136,16 @@ test("supported files are described without a link", () => {
   });
   assert.equal(clip.file, null);
   assert.equal(clip.link, "https://cdn.example/walk.mp4");
+
+  const unnamed = formatInbound({
+    type: "document",
+    phone: "+919812345678",
+    contact: { name: "Deepu", phone: "+919812345678" },
+    media_url: "https://cdn.example/media/abc123",
+  });
+  assert.equal(unnamed.link, "");
+  assert.equal(unnamed.file.kind, "document");
+  assert.doesNotMatch(renderInbound(unnamed).blocks[0].text.text, /cdn\.example/);
 });
 
 test("slack file permalinks are not sent as the caption", () => {

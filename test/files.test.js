@@ -3,11 +3,18 @@ import test from "node:test";
 import {
   classifyFile,
   contactBody,
+  describeInboundFile,
   describeSlackFile,
   parseVcf,
+  refineFileFromBytes,
+  sniffBytes,
   vcfFromContacts,
   whatsappMediaType,
 } from "../convex/lib/files.js";
+
+function officeZip(marker) {
+  return new TextEncoder().encode(`PK\u0003\u0004[Content_Types].xml ${marker}`);
+}
 
 test("office files, pictures, and contact cards are the allowed kinds", () => {
   assert.deepEqual(classifyFile({ name: "rates.xlsx" }), { kind: "document", ext: "xlsx" });
@@ -39,6 +46,30 @@ test("a slack file keeps its name and private link", () => {
   assert.equal(file.kind, "document");
   assert.equal(file.url, "https://files.slack.com/files-pri/T1/download/invoice.pdf");
   assert.equal(describeSlackFile({ name: "notes.txt", mimetype: "text/plain" }), null);
+});
+
+test("magic bytes recover the real type when the CDN has no name", () => {
+  assert.deepEqual(sniffBytes(new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d])), { kind: "document", ext: "pdf" });
+  assert.deepEqual(sniffBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), { kind: "image", ext: "png" });
+  assert.deepEqual(sniffBytes(officeZip("wordprocessingml.document")), { kind: "document", ext: "docx" });
+  assert.deepEqual(sniffBytes(officeZip("xl/workbook.xml spreadsheetml")), { kind: "document", ext: "xlsx" });
+  const refined = refineFileFromBytes(
+    { filename: "file", ext: "", mime: "application/octet-stream", kind: "document" },
+    new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]),
+  );
+  assert.equal(refined.filename, "file.pdf");
+  assert.equal(refined.ext, "pdf");
+  assert.equal(refined.mime, "application/pdf");
+});
+
+test("a WhatsApp document without a filename is still a file, not a link", () => {
+  const file = describeInboundFile({
+    type: "document",
+    media_url: "https://cdn.example/media/abc123",
+  });
+  assert.equal(file.kind, "document");
+  assert.equal(file.filename, "file");
+  assert.equal(file.url, "https://cdn.example/media/abc123");
 });
 
 test("contact cards round-trip through vcard text", () => {

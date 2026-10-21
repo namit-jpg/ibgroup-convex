@@ -22,6 +22,7 @@ import {
   FILE_TYPES_NOTE,
   maxBytes,
   parseVcf,
+  refineFileFromBytes,
   vcfFilename,
   vcfFromContacts,
   whatsappMediaType,
@@ -278,7 +279,9 @@ async function loadInboundFile(file, deps) {
   const bytes = downloaded?.bytes;
   if (!bytes) throw new Error(`Couldn't download ${file.filename}`);
   if (bytes.byteLength > 100 * 1024 * 1024) throw new Error(`${file.filename} is too large`);
-  return { ...file, bytes, mime: downloaded.contentType || file.mime };
+  const downloadedMime = String(downloaded.contentType || "").split(";")[0].trim();
+  const mime = contentTypeFor(file.ext, downloadedMime || file.mime);
+  return refineFileFromBytes({ ...file, mime }, bytes);
 }
 
 async function prepareInbound(view, deps) {

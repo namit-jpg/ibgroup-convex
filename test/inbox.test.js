@@ -445,6 +445,78 @@ test("a file sent outside Slack is attached in the channel", async () => {
   assert.equal(posts.some((post) => JSON.stringify(post).includes("cdn.example")), false);
 });
 
+test("an unnamed inbound document is sniffed from its bytes and uploaded", async () => {
+  const { deps, posts } = harness();
+  const uploads = [];
+  deps.slack.uploadFile = async (args) => {
+    uploads.push(args);
+    return { ok: true };
+  };
+  deps.files = {
+    async fetch(url) {
+      assert.equal(url, "https://cdn.example/media/abc123");
+      return {
+        bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34]),
+        contentType: "application/octet-stream",
+      };
+    },
+  };
+  await handleSendvise(
+    {
+      event: "message.received",
+      timestamp: new Date().toISOString(),
+      data: {
+        phone: "+919812345678",
+        type: "document",
+        media_url: "https://cdn.example/media/abc123",
+        contact: { name: "Deepu", phone: "+919812345678" },
+      },
+    },
+    "del-sniff",
+    deps,
+  );
+  assert.equal(uploads.length, 1);
+  assert.equal(uploads[0].filename, "file.pdf");
+  assert.equal(uploads[0].contentType, "application/pdf");
+  assert.equal(posts.some((post) => JSON.stringify(post).includes("cdn.example")), false);
+});
+
+test("an inbound Word file keeps its extension even when the CDN is generic", async () => {
+  const { deps, posts } = harness();
+  const uploads = [];
+  deps.slack.uploadFile = async (args) => {
+    uploads.push(args);
+    return { ok: true };
+  };
+  deps.files = {
+    async fetch() {
+      return {
+        bytes: new TextEncoder().encode("PK\u0003\u0004[Content_Types].xml wordprocessingml.document word/"),
+        contentType: "application/octet-stream",
+      };
+    },
+  };
+  await handleSendvise(
+    {
+      event: "message.received",
+      timestamp: new Date().toISOString(),
+      data: {
+        phone: "+919812345678",
+        type: "document",
+        filename: "po.docx",
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        media_url: "https://cdn.example/po.docx",
+        contact: { name: "Deepu", phone: "+919812345678" },
+      },
+    },
+    "del-docx",
+    deps,
+  );
+  assert.equal(uploads[0].filename, "po.docx");
+  assert.equal(uploads[0].contentType, "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+  assert.equal(posts.some((post) => JSON.stringify(post).includes("cdn.example")), false);
+});
+
 test("a file that cannot be fetched falls back to its link", async () => {
   const { deps, posts } = harness();
   deps.files = {

@@ -79,6 +79,16 @@ const MIME_EXT = {
   "text/directory": "vcf",
 };
 
+const GENERIC_MIME = new Set([
+  "application/octet-stream",
+  "binary/octet-stream",
+  "application/binary",
+  "application/x-binary",
+  "application/download",
+  "application/force-download",
+  "application/x-download",
+]);
+
 const IMAGE_BYTES = 5 * 1024 * 1024;
 const DOCUMENT_BYTES = 100 * 1024 * 1024;
 
@@ -115,8 +125,68 @@ function extFromMime(mime) {
 
 export function contentTypeFor(ext, mime = "") {
   const clean = cleanMime(mime);
-  if (clean && clean !== "application/octet-stream" && clean !== "binary/octet-stream") return clean;
+  if (clean && !GENERIC_MIME.has(clean)) return clean;
   return EXT_MIME[ext] || "application/octet-stream";
+}
+
+function startsWith(bytes, signature) {
+  if (bytes.length < signature.length) return false;
+  for (let i = 0; i < signature.length; i += 1) {
+    if (bytes[i] !== signature[i]) return false;
+  }
+  return true;
+}
+
+function asBytes(bytes) {
+  if (!bytes) return null;
+  if (bytes instanceof Uint8Array) return bytes;
+  if (ArrayBuffer.isView(bytes)) return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (bytes instanceof ArrayBuffer) return new Uint8Array(bytes);
+  return null;
+}
+
+export function sniffBytes(bytes) {
+  const b = asBytes(bytes);
+  if (!b?.byteLength) return null;
+  if (startsWith(b, [0x25, 0x50, 0x44, 0x46])) return { kind: "document", ext: "pdf" };
+  if (startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return { kind: "image", ext: "png" };
+  if (startsWith(b, [0xff, 0xd8, 0xff])) return { kind: "image", ext: "jpg" };
+  if (startsWith(b, [0x47, 0x49, 0x46, 0x38])) return { kind: "image", ext: "gif" };
+  if (b.length >= 12 && startsWith(b, [0x52, 0x49, 0x46, 0x46]) && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+    return { kind: "image", ext: "webp" };
+  }
+  if (startsWith(b, [0x42, 0x4d])) return { kind: "image", ext: "bmp" };
+  if (startsWith(b, [0x50, 0x4b, 0x03, 0x04]) || startsWith(b, [0x50, 0x4b, 0x05, 0x06]) || startsWith(b, [0x50, 0x4b, 0x07, 0x08])) {
+    const head = new TextDecoder("latin1").decode(b.subarray(0, Math.min(b.length, 65536)));
+    if (/word\/|wordprocessingml/i.test(head)) return { kind: "document", ext: "docx" };
+    if (/xl\/|spreadsheetml/i.test(head)) return { kind: "document", ext: "xlsx" };
+    if (/ppt\/|presentationml/i.test(head)) return { kind: "document", ext: "pptx" };
+  }
+  const textHead = new TextDecoder("utf-8").decode(b.subarray(0, Math.min(b.length, 64)));
+  if (/BEGIN:VCARD/i.test(textHead)) return { kind: "contact", ext: "vcf" };
+  return null;
+}
+
+function replaceExtension(name, ext, fallback) {
+  const safe = safeFilename(name, fallback);
+  if (!ext) return safe;
+  const current = extensionOf(safe);
+  if (current === ext) return safe;
+  const base = current ? safe.slice(0, safe.lastIndexOf(".")) : safe;
+  return `${base || "file"}.${ext}`;
+}
+
+export function refineFileFromBytes(file, bytes) {
+  const sniffed = sniffBytes(bytes);
+  if (!sniffed) return { ...file, bytes };
+  return {
+    ...file,
+    bytes,
+    kind: sniffed.kind,
+    ext: sniffed.ext,
+    filename: replaceExtension(file.filename, sniffed.ext, `file.${sniffed.ext}`),
+    mime: EXT_MIME[sniffed.ext] || file.mime,
+  };
 }
 
 export function classifyFile({ name = "", mimetype = "", filetype = "" } = {}) {
@@ -390,6 +460,7 @@ function inboundContacts(data) {
 function withExtension(name, ext, fallback) {
   const safe = safeFilename(name, fallback);
   if (extensionOf(safe)) return safe;
+  if (!ext) return safe;
   return `${safe}.${ext}`;
 }
 
@@ -417,8 +488,17 @@ export function describeInboundFile(data) {
   const mime = mimeOf(data);
   let classified = classifyFile({ name, mimetype: mime, filetype: type === "image" || type === "sticker" ? "" : type });
   if (!classified && (type === "image" || type === "sticker")) classified = { kind: "image", ext: extFromMime(mime) || "jpg" };
+  if (!classified && (type === "document" || type === "file" || mediaUrlOf(data))) {
+    const ext = extFromMime(mime) || extensionOf(name);
+    const kind = IMAGE_EXT.has(ext) ? "image" : ext === "vcf" ? "contact" : "document";
+    classified = { kind, ext };
+  }
   if (!classified) return null;
-  const fallback = classified.kind === "image" ? `image.${classified.ext}` : `file.${classified.ext}`;
+  const fallback = classified.ext
+    ? `${classified.kind === "image" ? "image" : "file"}.${classified.ext}`
+    : classified.kind === "image"
+      ? "image"
+      : "file";
   return {
     kind: classified.kind,
     ext: classified.ext,

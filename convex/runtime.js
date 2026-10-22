@@ -1,5 +1,6 @@
 import { internal } from "./_generated/api";
 import { loadConfig } from "./lib/config.js";
+import { whatsappContentType } from "./lib/files.js";
 import { createSendvise, createTemplateSource } from "./lib/sendvise.js";
 import { createSlack } from "./lib/slack.js";
 
@@ -46,6 +47,36 @@ export function makeDeps(ctx) {
     store,
     sendvise,
     slack: createSlack(config.slackBotToken),
+    files: {
+      async fetch(url) {
+        if (!/^https:\/\//i.test(String(url || ""))) throw new Error("File link must be https");
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Could not download the file (${res.status})`);
+        return {
+          bytes: new Uint8Array(await res.arrayBuffer()),
+          contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
+          contentDisposition: res.headers.get("content-disposition") || "",
+        };
+      },
+      async publish(bytes, { filename, ext, contentType } = {}) {
+        const type = whatsappContentType(ext, contentType);
+        const uploadUrl = await ctx.runMutation(internal.store.makeUploadUrl, {});
+        const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        const res = await fetch(uploadUrl, {
+          method: "POST",
+          headers: { "Content-Type": type },
+          body: new Blob([body], { type }),
+        });
+        if (!res.ok) throw new Error(`Could not store the file (${res.status})`);
+        const stored = await res.json().catch(() => ({}));
+        if (!stored.storageId) throw new Error("Could not store the file");
+        const name = encodeURIComponent(filename || "file");
+        if (config.publicBaseUrl) return `${config.publicBaseUrl}/files/${stored.storageId}/${name}`;
+        const url = await ctx.runQuery(internal.store.publicFileUrl, { storageId: stored.storageId });
+        if (!url) throw new Error("Could not publish the file");
+        return url;
+      },
+    },
     templates: createTemplateSource(sendvise),
     config,
     log: console,

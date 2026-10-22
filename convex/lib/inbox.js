@@ -1,4 +1,5 @@
 import {
+  captionWithoutFileLinks,
   channelName,
   errorText,
   eventTimeSeconds,
@@ -10,14 +11,53 @@ import {
   phoneFrom,
   renderInbound,
   renderTemplate,
-  slackTextToPlain,
   templateVariables,
   wamidFrom,
   windowOpen,
 } from "./bridge.js";
+import {
+  contactBody,
+  contentTypeFor,
+  describeSlackFile,
+  extensionOf,
+  filenameFromDisposition,
+  whatsappContentType,
+  FILE_TYPES_NOTE,
+  isStorageName,
+  maxBytes,
+  parseVcf,
+  refineFileFromBytes,
+  vcfFilename,
+  vcfFromContacts,
+  whatsappMediaType,
+} from "./files.js";
 import { publishHome } from "./home.js";
 
 const TEMPLATE_FIRST = "WhatsApp won't deliver a free-form reply until they message you. Send another template from the WhatsApp Home tab.";
+
+function fileFields(data) {
+  const lines = [];
+  const walk = (value, path, depth) => {
+    if (depth > 12 || value == null || lines.length > 40) return;
+    if (typeof value === "string") {
+      if (/file|name|caption|message|title|original/i.test(path) && !/^https?:/i.test(value)) {
+        lines.push(`${path}=${value.slice(0, 80)}`);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "contact" || key === "contacts") continue;
+      walk(child, path ? `${path}.${key}` : key, depth + 1);
+    }
+  };
+  walk(data, "", 0);
+  return lines.join(" | ");
+}
 
 async function refreshHome(userId, deps) {
   if (!userId) return;
@@ -66,7 +106,7 @@ async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origi
   await deps.slack.setPurpose?.(channelId, `WhatsApp +${phone}`, deps.config.slackTeamId);
   const who = name || "WhatsApp contact";
   const intro = origin === "inbound"
-    ? `*${who}* · \`+${phone}\`\n${assigneeUserId ? `<@${assigneeUserId}> this one is yours. ` : ""}Reply in this channel and it goes to WhatsApp.`
+    ? `*${who}* · \`+${phone}\`\n${assigneeUserId ? `<@${assigneeUserId}> this one is yours. ` : ""}Reply in this channel and it goes to WhatsApp, including images, PDF, Word, Excel, PowerPoint, CSV, and contact cards.`
     : `*${who}* · \`+${phone}\`\nThis chat was started with a template. Their reply will show up here. Answer in this channel after they write back. Until then, send another template from the WhatsApp Home tab.`;
   await deps.slack.postMessage({ channel: channelId, text: intro });
   return await deps.store.getContact(phone);
@@ -87,6 +127,9 @@ async function onReceived(payload, deps) {
   }
   const existing = await deps.store.getContact(phone);
   const view = formatInbound(data);
+  if (view.file && isStorageName(view.file.filename)) {
+    deps.log.info?.(`[bridge] inbound file has no customer name (${view.file.filename}); fields ${fileFields(data)}`);
+  }
   const assignee = await assigneeForNewInbound(existing, deps);
   const contact = await ensureChannel(
     phone,
@@ -98,13 +141,12 @@ async function onReceived(payload, deps) {
     },
     deps,
   );
-  const rendered = renderInbound(view);
-  await deps.slack.postMessage({ channel: contact.channel_id, ...rendered });
+  const shown = await postInbound(contact.channel_id, view, deps);
   const saved = await deps.store.upsertContact(phone, {
     name: view.name,
     conversationId: data.conversation_id != null ? String(data.conversation_id) : undefined,
     lastInboundAt: eventTimeSeconds(payload.timestamp),
-    lastMessage: view.body,
+    lastMessage: shown.body,
     lastDirection: "in",
   });
   deps.log.info?.(`[bridge] inbound ${maskPhone(phone)}`);
@@ -117,7 +159,8 @@ async function onSent(payload, deps) {
   if (wamid && await deps.store.getOutbound(wamid)) return;
   const phone = phoneFrom(data);
   if (!phone) return;
-  const body = data.message || data.text || data.body || "Outbound WhatsApp message";
+  const plain = data.message || data.text || data.body || "";
+  const view = formatInbound(data);
   const existing = await deps.store.getContact(phone);
   const assignee = existing?.assignee_user_id || await deps.store.nextAssignee(deps.config.agentUserIds);
   const contact = await ensureChannel(
@@ -130,10 +173,18 @@ async function onSent(payload, deps) {
     },
     deps,
   );
+  let body = plain || "Outbound WhatsApp message";
+  let shared = null;
+  if (view.file) {
+    const prepared = await prepareInbound(view, deps);
+    body = prepared.view.body || view.file.filename || body;
+    shared = prepared;
+  }
   const posted = await deps.slack.postMessage({
     channel: contact.channel_id,
     text: `Sent outside Slack to +${phone}\n${body}`,
   });
+  if (shared) await sharePrepared(contact.channel_id, shared, deps);
   await deps.store.upsertContact(phone, { lastMessage: body, lastDirection: "out" });
   if (wamid) {
     await deps.store.rememberOutbound({
@@ -250,21 +301,178 @@ async function say(channel, text, deps) {
   await deps.slack.postMessage({ channel, text });
 }
 
+async function loadInboundFile(file, deps) {
+  if (file.vcf) return { ...file, bytes: new TextEncoder().encode(file.vcf) };
+  if (file.bytes) return file;
+  if (!file.url) throw new Error(`Missing file link for ${file.filename}`);
+  if (!deps.files?.fetch) throw new Error(`Couldn't download ${file.filename}`);
+  const downloaded = await deps.files.fetch(file.url);
+  const bytes = downloaded?.bytes;
+  if (!bytes) throw new Error(`Couldn't download ${file.filename}`);
+  if (bytes.byteLength > 100 * 1024 * 1024) throw new Error(`${file.filename} is too large`);
+  const downloadedMime = String(downloaded.contentType || "").split(";")[0].trim();
+  const mime = contentTypeFor(file.ext, downloadedMime || file.mime);
+  const headerName = filenameFromDisposition(downloaded.contentDisposition);
+  const named = headerName && (isStorageName(file.filename) || !file.filename)
+    ? { ...file, filename: headerName, ext: extensionOf(headerName) || file.ext }
+    : file;
+  return refineFileFromBytes({ ...named, mime }, bytes);
+}
+
+async function prepareInbound(view, deps) {
+  if (!view.file) return { view, failedName: "" };
+  try {
+    const file = await loadInboundFile(view.file, deps);
+    let body = view.body;
+    if (!body || body === view.file.filename || isStorageName(body)) body = file.caption || file.filename;
+    if (file.kind === "contact") {
+      const parsed = parseVcf(file.vcf || new TextDecoder().decode(file.bytes));
+      if (parsed.length) {
+        body = contactBody(parsed);
+        file.summary = body;
+        file.vcf = vcfFromContacts(parsed);
+        file.bytes = new TextEncoder().encode(file.vcf);
+        file.filename = parsed.length === 1 ? vcfFilename(parsed[0].name.formatted_name) : "contacts.vcf";
+        file.mime = "text/vcard";
+        file.ext = "vcf";
+      }
+    }
+    return { view: { ...view, body, link: "", file }, failedName: "" };
+  } catch (err) {
+    deps.log.error?.(`[bridge] inbound file failed: ${err.message}`);
+    return {
+      view: { ...view, file: null, link: "" },
+      failedName: view.file.filename,
+      sourceUrl: view.file.url || "",
+      reason: err.message,
+    };
+  }
+}
+
+async function shareFile(channel, file, deps) {
+  const bytes = file.bytes;
+  if (!bytes?.byteLength) return;
+  if (!deps.slack.uploadFile) throw new Error("Slack file upload is not configured");
+  await deps.slack.uploadFile({
+    channel,
+    filename: file.filename,
+    title: file.kind === "contact" ? file.filename.replace(/\.vcf$/i, "") : file.filename,
+    bytes,
+    contentType: contentTypeFor(file.ext, file.mime),
+    altText: file.kind === "image" ? file.filename : "",
+  });
+}
+
+function missingFileText(filename, url, reason) {
+  const why = reason ? ` (${reason})` : "";
+  const line = `Couldn't show ${filename} in Slack${why}.`;
+  return url ? `${line}\n${url}` : line;
+}
+
+async function sharePrepared(channel, prepared, deps) {
+  if (prepared.view.file) {
+    try {
+      await shareFile(channel, prepared.view.file, deps);
+    } catch (err) {
+      deps.log.error?.(`[bridge] slack upload failed: ${err.message}`);
+      await deps.slack.postMessage({
+        channel,
+        text: missingFileText(prepared.view.file.filename, prepared.view.file.url, err.message),
+      });
+    }
+    return;
+  }
+  if (prepared.failedName) {
+    await deps.slack.postMessage({
+      channel,
+      text: missingFileText(prepared.failedName, prepared.sourceUrl, prepared.reason),
+    });
+  }
+}
+
+async function postInbound(channel, view, deps) {
+  const prepared = await prepareInbound(view, deps);
+  const rendered = renderInbound(prepared.view);
+  await deps.slack.postMessage({ channel, ...rendered });
+  await sharePrepared(channel, prepared, deps);
+  return prepared.view;
+}
+
+async function rememberSend(contact, message, preview, data, deps) {
+  const wamid = data?.message_id || data?.wamid;
+  if (!wamid) return;
+  await deps.store.rememberOutbound({
+    wamid,
+    phone: contact.phone,
+    channelId: message.channel,
+    slackTs: message.ts,
+    slackUserId: message.user,
+    preview,
+    status: "sent",
+  });
+}
+
+async function deliverText(contact, message, text, deps) {
+  const data = await deps.sendvise.sendText(contact.phone, text);
+  await rememberSend(contact, message, text, data, deps);
+}
+
+async function deliverFile(contact, message, file, caption, deps) {
+  const limit = maxBytes(file);
+  if (file.size > limit) throw new Error(`${file.filename} is too large for WhatsApp`);
+  if (!file.url || !deps.slack.download) throw new Error(`Couldn't read ${file.filename} from Slack`);
+  const downloaded = await deps.slack.download(file.url);
+  const bytes = downloaded?.bytes;
+  if (!bytes) throw new Error(`Couldn't read ${file.filename} from Slack`);
+  if (bytes.byteLength > limit) throw new Error(`${file.filename} is too large for WhatsApp`);
+  let data;
+  if (file.kind === "contact") {
+    const contacts = parseVcf(new TextDecoder().decode(bytes)).filter(
+      (card) => card.name?.formatted_name && (card.phones.length || card.emails.length),
+    );
+    if (contacts.length && deps.sendvise.sendContacts) data = await deps.sendvise.sendContacts(contact.phone, contacts);
+    else data = await publishAndSend(contact.phone, file, bytes, caption, downloaded.contentType, deps);
+  } else {
+    data = await publishAndSend(contact.phone, file, bytes, caption, downloaded.contentType, deps);
+  }
+  await rememberSend(contact, message, caption || file.filename, data, deps);
+}
+
+async function publishAndSend(phone, file, bytes, caption, contentType, deps) {
+  if (!deps.files?.publish || !deps.sendvise.sendMedia) throw new Error(`Couldn't send ${file.filename} to WhatsApp`);
+  const mediaUrl = await deps.files.publish(bytes, {
+    filename: file.filename,
+    ext: file.ext,
+    contentType: whatsappContentType(file.ext, contentType || file.mime),
+  });
+  return deps.sendvise.sendMedia(phone, {
+    type: whatsappMediaType(file),
+    mediaUrl,
+    filename: file.filename,
+    caption,
+  });
+}
+
 export async function handleSlackMessage({ message, eventId }, deps) {
   if (!isHumanChannelMessage(message)) return;
   const contact = await deps.store.getByChannel(message.channel);
   if (!contact) return;
 
-  const files = message.files?.length || 0;
-  const text = slackTextToPlain(message.text || "");
+  const text = captionWithoutFileLinks(message.text || "");
+  const accepted = [];
+  const skipped = [];
+  for (const file of message.files || []) {
+    const described = describeSlackFile(file);
+    if (described) accepted.push(described);
+    else skipped.push(file);
+  }
   if (eventId && !(await deps.store.claim(eventId))) return;
 
   try {
-    if (!text && files) {
-      await say(message.channel, "Files stay in Slack. Send the text here, or send a template with a file link from the WhatsApp Home tab.", deps);
+    if (!text && accepted.length === 0) {
+      if (skipped.length) await say(message.channel, FILE_TYPES_NOTE, deps);
       return;
     }
-    if (!text) return;
     if (contact.opted_out) {
       await say(message.channel, `+${contact.phone} opted out. WhatsApp sends stay blocked until they opt in.`, deps);
       return;
@@ -277,21 +485,21 @@ export async function handleSlackMessage({ message, eventId }, deps) {
       return;
     }
 
-    const data = await deps.sendvise.sendText(contact.phone, text);
-    const wamid = data.message_id || data.wamid;
-    if (wamid) {
-      await deps.store.rememberOutbound({
-        wamid,
-        phone: contact.phone,
-        channelId: message.channel,
-        slackTs: message.ts,
-        slackUserId: message.user,
-        preview: text,
-        status: "sent",
-      });
+    let caption = "";
+    if (text && accepted.length && text.length <= 1024) caption = text;
+    else if (text) await deliverText(contact, message, text, deps);
+    for (let i = 0; i < accepted.length; i += 1) {
+      await deliverFile(contact, message, accepted[i], i === 0 ? caption : "", deps);
     }
-    await deps.store.upsertContact(contact.phone, { lastMessage: text, lastDirection: "out" });
+    await deps.store.upsertContact(contact.phone, {
+      lastMessage: text || accepted.map((file) => file.filename).join(", "),
+      lastDirection: "out",
+    });
     await deps.slack.addReaction({ channel: message.channel, timestamp: message.ts, name: "white_check_mark" });
+    if (skipped.length) {
+      const names = skipped.map((file) => file.name || file.title || "a file").join(", ");
+      await say(message.channel, `Left ${names} in Slack. ${FILE_TYPES_NOTE}`, deps);
+    }
   } catch (err) {
     if (eventId) await deps.store.release(eventId);
     const note = isWindowClosedError(err) ? TEMPLATE_FIRST : `WhatsApp send failed: ${err.message}`;

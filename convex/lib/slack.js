@@ -1,25 +1,75 @@
+function slackError(method, json) {
+  const detail = Array.isArray(json.response_metadata?.messages)
+    ? json.response_metadata.messages.filter(Boolean).join("; ")
+    : "";
+  const err = new Error(`${method}: ${json.error || "failed"}${detail ? ` (${detail})` : ""}`);
+  err.code = json.error;
+  return err;
+}
+
+function formBody(params) {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value == null || value === "") continue;
+    body.set(key, String(value));
+  }
+  return body.toString();
+}
+
 export function createSlack(token, log = console) {
-  async function api(method, body) {
+  async function api(method, body, { form = false } = {}) {
     const res = await fetch(`https://slack.com/api/${method}`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": form ? "application/x-www-form-urlencoded" : "application/json; charset=utf-8",
       },
-      body: JSON.stringify(body),
+      body: form ? formBody(body) : JSON.stringify(body),
     });
     const json = await res.json().catch(() => ({}));
-    if (!json.ok) {
-      const err = new Error(`${method}: ${json.error || "failed"}`);
-      err.code = json.error;
-      throw err;
-    }
+    if (!json.ok) throw slackError(method, json);
     return json;
   }
 
   return {
     postMessage(args) {
       return api("chat.postMessage", { unfurl_links: true, unfurl_media: false, ...args });
+    },
+    async download(url) {
+      let host = "";
+      try {
+        host = new URL(url).hostname;
+      } catch {
+        throw new Error("Missing Slack file link");
+      }
+      const allowed = host === "files.slack.com" || host.endsWith(".slack.com") || host === "slack-files.com" || host.endsWith(".slack-files.com");
+      if (!allowed) throw new Error("Slack file link is not on Slack");
+      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) throw new Error(`Slack file download failed (${res.status})`);
+      return {
+        bytes: new Uint8Array(await res.arrayBuffer()),
+        contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
+      };
+    },
+    async uploadFile({ channel, filename, title, bytes, altText }) {
+      // This method ignores a JSON body and then reports the required fields as missing.
+      const started = await api("files.getUploadURLExternal", {
+        filename,
+        length: bytes.byteLength,
+        ...(altText ? { alt_txt: String(altText).slice(0, 1000) } : {}),
+      }, { form: true });
+      // Slack infers type from the filename. Office MIME types on this POST
+      // make Word/Excel land as application/octet-stream (.bin) with no preview.
+      const upload = await fetch(started.upload_url, {
+        method: "POST",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: bytes,
+      });
+      if (!upload.ok) throw new Error(`Slack file upload failed (${upload.status})`);
+      return api("files.completeUploadExternal", {
+        files: [{ id: started.file_id, title: title || filename }],
+        channel_id: channel,
+      });
     },
     async addReaction(args) {
       try {

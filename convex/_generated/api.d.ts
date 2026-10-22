@@ -12,6 +12,7 @@ import type * as http from "../http.js";
 import type * as jobs from "../jobs.js";
 import type * as lib_bridge from "../lib/bridge.js";
 import type * as lib_config from "../lib/config.js";
+import type * as lib_files from "../lib/files.js";
 import type * as lib_home from "../lib/home.js";
 import type * as lib_inbox from "../lib/inbox.js";
 import type * as lib_sendvise from "../lib/sendvise.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   jobs: typeof jobs;
   "lib/bridge": typeof lib_bridge;
   "lib/config": typeof lib_config;
+  "lib/files": typeof lib_files;
   "lib/home": typeof lib_home;
   "lib/inbox": typeof lib_inbox;
   "lib/sendvise": typeof lib_sendvise;

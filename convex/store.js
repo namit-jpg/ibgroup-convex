@@ -222,6 +222,16 @@ export const release = internalMutation({
   },
 });
 
+export const makeUploadUrl = internalMutation({
+  args: {},
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
+});
+
+export const publicFileUrl = internalQuery({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, { storageId }) => ctx.storage.getUrl(storageId),
+});
+
 export const nextAssignee = internalMutation({
   args: { agentIds: v.array(v.string()) },
   handler: async (ctx, { agentIds }) => {

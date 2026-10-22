@@ -1,3 +1,5 @@
+import { describeInboundFile } from "./files.js";
+
 export const WINDOW_SECONDS = 24 * 60 * 60;
 const SKEW_SECONDS = 5 * 60;
 
@@ -186,12 +188,19 @@ export function formatInbound(data) {
     if (interactive.description) body += `\n${interactive.description}`;
   }
 
-  const media = data?.media_url || data?.media?.url || (type !== "text" && type !== "location" ? data?.url : "");
-  if (media) link = link || media;
+  const file = describeInboundFile(data);
+  if (file) {
+    body = file.kind === "contact" ? file.summary || file.caption || file.filename : file.caption || file.filename;
+    link = "";
+  } else {
+    const media = data?.media_url || data?.media?.url || (type !== "text" && type !== "location" ? data?.url : "");
+    if (media) link = link || media;
+    if (!body) body = `(${type})`;
+    if (data?.filename) body = `${data.filename}\n${body}`;
+  }
   if (!body) body = `(${type})`;
-  if (data?.filename) body = `${data.filename}\n${body}`;
 
-  return { name, phone, type, body, link };
+  return { name, phone, type, body, link, file };
 }
 
 export function renderInbound(view, { hint } = {}) {
@@ -202,6 +211,13 @@ export function renderInbound(view, { hint } = {}) {
     text: clip(`${view.name} (+${view.phone}): ${view.body}`),
     blocks: [{ type: "section", text: { type: "mrkdwn", text: clip(mrkdwn) } }],
   };
+}
+
+export function captionWithoutFileLinks(text) {
+  const stripped = String(text || "")
+    .replace(/<https?:\/\/[^>|]*\/files\/[^>]*>/gi, "")
+    .replace(/<https?:\/\/files\.slack\.com[^>]*>/gi, "");
+  return slackTextToPlain(stripped);
 }
 
 export function slackTextToPlain(text) {

@@ -324,8 +324,10 @@ function collectFilenames(value, key, out, depth) {
     }
     // WhatsApp's original name is often buried under the raw Cloud API envelope,
     // or on a title/name field, while media.filename is only the storage id.
-    const filenameKey = /filename|file_name|original_name|document_name/i.test(key);
-    if (filenameKey || looksLikeFilename(trimmed)) out.push(trimmed);
+    // Only real filename fields. A MIME type such as
+    // application/...wordprocessingml.document also ends in a short extension,
+    // and using it as the name makes Word and Excel land in Slack as binary.
+    if (/filename|file_name|original_name|document_name/i.test(key)) out.push(trimmed);
     return;
   }
   if (key === "contact" || key === "contacts") return;

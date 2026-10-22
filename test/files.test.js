@@ -137,6 +137,27 @@ test("a storage id loses to the WhatsApp filename nested in the provider payload
   assert.equal(wrapped.filename, "open ai - ad.docx");
 });
 
+test("a mime type is not used as the filename", () => {
+  const word = describeInboundFile({
+    type: "document",
+    message: "[document]",
+    filename: "5f0b603c-9a1f-4bc2-bb3b-61247a49bd24.bin",
+    mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    media_url: "https://cdn.example/5f0b603c-9a1f-4bc2-bb3b-61247a49bd24.bin",
+  });
+  assert.equal(word.filename, "5f0b603c-9a1f-4bc2-bb3b-61247a49bd24.bin");
+  assert.equal(word.ext, "docx");
+  const sheet = describeInboundFile({
+    type: "document",
+    message: "[document]",
+    media: { filename: "80a3372a-2206-48e2-a634-ce2dd21dc1d1.bin" },
+    mime_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    media_url: "https://cdn.example/80a3372a-2206-48e2-a634-ce2dd21dc1d1.bin",
+  });
+  assert.equal(sheet.filename, "80a3372a-2206-48e2-a634-ce2dd21dc1d1.bin");
+  assert.equal(sheet.ext, "xlsx");
+});
+
 test("a stored uuid name loses to the filename the customer sent", () => {
   const file = describeInboundFile({
     type: "document",

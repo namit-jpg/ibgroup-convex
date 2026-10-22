@@ -55,6 +55,7 @@ export function makeDeps(ctx) {
         return {
           bytes: new Uint8Array(await res.arrayBuffer()),
           contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
+          contentDisposition: res.headers.get("content-disposition") || "",
         };
       },
       async publish(bytes, { filename, ext, contentType } = {}) {

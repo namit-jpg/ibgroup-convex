@@ -5,6 +5,7 @@ import {
   contactBody,
   contentDisposition,
   describeInboundFile,
+  filenameFromDisposition,
   describeSlackFile,
   parseVcf,
   refineFileFromBytes,
@@ -91,6 +92,49 @@ test("a storage bin name takes csv when the type is already known", () => {
     new TextEncoder().encode("shop,city\n"),
   );
   assert.equal(named.filename, "FinalABISProShop - khamla.csv");
+});
+
+test("a storage id loses to the WhatsApp filename nested in the provider payload", () => {
+  const file = describeInboundFile({
+    type: "document",
+    message: "[document]",
+    media: {
+      filename: "3db17247-00cc-4e37-8ff3-a442d935c842.bin",
+      url: "https://cdn.example/media/264/conversations/1/3db17247-00cc-4e37-8ff3-a442d935c842.bin",
+    },
+    raw: {
+      entry: [
+        {
+          changes: [
+            {
+              value: {
+                messages: [
+                  {
+                    type: "document",
+                    document: { filename: "IB_NEXT.pptx", mime_type: "application/vnd.openxmlformats-officedocument.presentationml.presentation" },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    },
+  });
+  assert.equal(file.filename, "IB_NEXT.pptx");
+  assert.equal(file.ext, "pptx");
+  assert.equal(
+    filenameFromDisposition("attachment; filename=\"FinalABISProShop - khamla.csv\""),
+    "FinalABISProShop - khamla.csv",
+  );
+  const wrapped = describeInboundFile({
+    type: "document",
+    message: "[document]",
+    media: { filename: "6b305625-bb0b-42c2-af6d-87541ab07217.bin" },
+    content: JSON.stringify({ filename: "open ai - ad.docx" }),
+    media_url: "https://cdn.example/6b305625-bb0b-42c2-af6d-87541ab07217.bin",
+  });
+  assert.equal(wrapped.filename, "open ai - ad.docx");
 });
 
 test("a stored uuid name loses to the filename the customer sent", () => {

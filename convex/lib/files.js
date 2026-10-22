@@ -310,12 +310,22 @@ function looksLikeFilename(value) {
 }
 
 function collectFilenames(value, key, out, depth) {
-  if (depth > 5 || value == null) return;
+  if (depth > 14 || value == null) return;
   if (typeof value === "string") {
-    if (/filename|file_name|original_name|document_name/i.test(key)) {
-      const trimmed = value.trim();
-      if (trimmed && !/^https?:\/\//i.test(trimmed)) out.push(trimmed);
+    const trimmed = value.trim();
+    if (!trimmed || /^https?:\/\//i.test(trimmed)) return;
+    if ((trimmed.startsWith("{") || trimmed.startsWith("[")) && trimmed.length < 20000) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === "object") collectFilenames(parsed, key, out, depth + 1);
+      } catch {
+        // plain text
+      }
     }
+    // WhatsApp's original name is often buried under the raw Cloud API envelope,
+    // or on a title/name field, while media.filename is only the storage id.
+    const filenameKey = /filename|file_name|original_name|document_name/i.test(key);
+    if (filenameKey || looksLikeFilename(trimmed)) out.push(trimmed);
     return;
   }
   if (key === "contact" || key === "contacts") return;
@@ -330,6 +340,24 @@ function collectFilenames(value, key, out, depth) {
   }
 }
 
+export function filenameFromDisposition(header) {
+  const value = String(header || "");
+  const star = value.match(/filename\*\s*=\s*(?:UTF-8|utf-8)?''([^;]+)/i);
+  if (star) {
+    try {
+      const name = decodeURIComponent(star[1].trim().replace(/^"|"$/g, ""));
+      if (looksLikeFilename(name) && !isStorageName(name)) return safeFilename(name);
+    } catch {
+      // ignore a bad encoding
+    }
+  }
+  const plain = value.match(/filename\s*=\s*"([^"]+)"/i) || value.match(/filename\s*=\s*([^;]+)/i);
+  if (!plain) return "";
+  const name = plain[1].trim().replace(/^"|"$/g, "");
+  if (!looksLikeFilename(name) || isStorageName(name)) return "";
+  return safeFilename(name);
+}
+
 function filenameOf(data) {
   const names = [];
   collectFilenames(data, "", names, 0);
@@ -341,7 +369,14 @@ function filenameOf(data) {
   const url = mediaUrlOf(data);
   if (!url) return "";
   try {
-    const base = decodeURIComponent(new URL(url).pathname.split("/").pop() || "");
+    const parsed = new URL(url);
+    const fromHeader = filenameFromDisposition(
+      parsed.searchParams.get("response-content-disposition") || parsed.searchParams.get("filename") || "",
+    );
+    if (fromHeader) return fromHeader;
+    const base = decodeURIComponent(parsed.pathname.split("/").pop() || "");
+    const stripped = base.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/i, "");
+    if (stripped && stripped !== base && extensionOf(stripped) && !isStorageName(stripped)) return stripped;
     if (extensionOf(base)) return base;
   } catch {
     return "";

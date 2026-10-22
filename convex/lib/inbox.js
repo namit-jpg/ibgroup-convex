@@ -19,6 +19,8 @@ import {
   contactBody,
   contentTypeFor,
   describeSlackFile,
+  extensionOf,
+  filenameFromDisposition,
   whatsappContentType,
   FILE_TYPES_NOTE,
   isStorageName,
@@ -36,12 +38,18 @@ const TEMPLATE_FIRST = "WhatsApp won't deliver a free-form reply until they mess
 function fileFields(data) {
   const lines = [];
   const walk = (value, path, depth) => {
-    if (depth > 4 || value == null || lines.length > 30) return;
+    if (depth > 12 || value == null || lines.length > 40) return;
     if (typeof value === "string") {
-      if (/file|name|caption|message/i.test(path) && !/^https?:/i.test(value)) lines.push(`${path}=${value.slice(0, 80)}`);
+      if (/file|name|caption|message|title|original/i.test(path) && !/^https?:/i.test(value)) {
+        lines.push(`${path}=${value.slice(0, 80)}`);
+      }
       return;
     }
-    if (typeof value !== "object" || Array.isArray(value)) return;
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => walk(item, `${path}[${index}]`, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
     for (const [key, child] of Object.entries(value)) {
       if (key === "contact" || key === "contacts") continue;
       walk(child, path ? `${path}.${key}` : key, depth + 1);
@@ -304,7 +312,11 @@ async function loadInboundFile(file, deps) {
   if (bytes.byteLength > 100 * 1024 * 1024) throw new Error(`${file.filename} is too large`);
   const downloadedMime = String(downloaded.contentType || "").split(";")[0].trim();
   const mime = contentTypeFor(file.ext, downloadedMime || file.mime);
-  return refineFileFromBytes({ ...file, mime }, bytes);
+  const headerName = filenameFromDisposition(downloaded.contentDisposition);
+  const named = headerName && (isStorageName(file.filename) || !file.filename)
+    ? { ...file, filename: headerName, ext: extensionOf(headerName) || file.ext }
+    : file;
+  return refineFileFromBytes({ ...named, mime }, bytes);
 }
 
 async function prepareInbound(view, deps) {

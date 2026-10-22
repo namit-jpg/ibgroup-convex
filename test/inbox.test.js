@@ -481,6 +481,45 @@ test("an unnamed inbound document is sniffed from its bytes and uploaded", async
   assert.equal(posts.some((post) => JSON.stringify(post).includes("cdn.example")), false);
 });
 
+test("an inbound document keeps the customer filename instead of the storage id", async () => {
+  const { deps, posts } = harness();
+  const uploads = [];
+  deps.slack.uploadFile = async (args) => {
+    uploads.push(args);
+    return { ok: true };
+  };
+  deps.files = {
+    async fetch() {
+      return {
+        bytes: new TextEncoder().encode("PK\u0003\u0004[Content_Types].xml spreadsheetml xl/"),
+        contentType: "application/octet-stream",
+      };
+    },
+  };
+  await handleSendvise(
+    {
+      event: "message.received",
+      timestamp: new Date().toISOString(),
+      data: {
+        phone: "+919812345678",
+        type: "document",
+        filename: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+        message: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+        document: { filename: "FinalABISProShop - Manish nagar - Copy.xlsx" },
+        media_url: "https://cdn.example/78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+        contact: { name: "Deepu", phone: "+919812345678" },
+      },
+    },
+    "del-customer-name",
+    deps,
+  );
+  assert.equal(uploads[0].filename, "FinalABISProShop - Manish nagar - Copy.xlsx");
+  assert.equal(uploads[0].title, "FinalABISProShop - Manish nagar - Copy.xlsx");
+  const rendered = posts.map((post) => post.text).join("\n");
+  assert.match(rendered, /FinalABISProShop - Manish nagar - Copy\.xlsx/);
+  assert.doesNotMatch(rendered, /78fb2b91/);
+});
+
 test("an inbound Word file keeps its extension even when the CDN is generic", async () => {
   const { deps, posts } = harness();
   const uploads = [];

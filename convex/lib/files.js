@@ -192,6 +192,20 @@ function replaceExtension(name, ext, fallback) {
   return `${base || "file"}.${ext}`;
 }
 
+const STORAGE_STEM = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isStorageName(name) {
+  const base = String(name || "").split(/[/\\]/).pop().split("?")[0];
+  const dot = base.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  return STORAGE_STEM.test(stem);
+}
+
+function genericExtension(name) {
+  const ext = extensionOf(name);
+  return !ext || ext === "bin" || ext === "octet";
+}
+
 export function refineFileFromBytes(file, bytes) {
   let sniffed = null;
   try {
@@ -199,7 +213,7 @@ export function refineFileFromBytes(file, bytes) {
   } catch {
     sniffed = null;
   }
-  if (!sniffed) return { ...file, bytes };
+  if (!sniffed || !genericExtension(file.filename)) return { ...file, bytes };
   return {
     ...file,
     bytes,
@@ -265,16 +279,42 @@ function mediaUrlOf(data) {
   );
 }
 
+function looksLikeFilename(value) {
+  const base = String(value || "").trim();
+  if (!base || base.length > 180 || /[\r\n]/.test(base)) return false;
+  const ext = extensionOf(base);
+  return /^[a-z0-9]{1,8}$/.test(ext);
+}
+
+function collectFilenames(value, key, out, depth) {
+  if (depth > 5 || value == null) return;
+  if (typeof value === "string") {
+    if (/filename|file_name|original_name|document_name/i.test(key)) {
+      const trimmed = value.trim();
+      if (trimmed && !/^https?:\/\//i.test(trimmed)) out.push(trimmed);
+    }
+    return;
+  }
+  if (key === "contact" || key === "contacts") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectFilenames(item, key, out, depth + 1);
+    return;
+  }
+  if (typeof value === "object") {
+    for (const [childKey, child] of Object.entries(value)) {
+      collectFilenames(child, childKey, out, depth + 1);
+    }
+  }
+}
+
 function filenameOf(data) {
-  const named = firstString(
-    data.filename,
-    data.document?.filename,
-    data.image?.filename,
-    data.file?.filename,
-    data.media?.filename,
-    data.sticker?.filename,
-  );
-  if (named) return named;
+  const names = [];
+  collectFilenames(data, "", names, 0);
+  const message = firstString(data.message);
+  if (looksLikeFilename(message)) names.push(message.trim());
+  const human = names.find((name) => !isStorageName(name));
+  if (human) return human;
+  if (names[0]) return names[0];
   const url = mediaUrlOf(data);
   if (!url) return "";
   try {
@@ -305,7 +345,7 @@ function captionOf(data) {
   if (!message) return "";
   const filename = filenameOf(data);
   const type = String(data.type || "").toLowerCase();
-  if (message === filename || message === `(${type})` || message === `[${type}]`) return "";
+  if (message === filename || isStorageName(message) || message === `(${type})` || message === `[${type}]`) return "";
   return message;
 }
 

@@ -62,6 +62,21 @@ test("magic bytes recover the real type when the CDN has no name", () => {
   assert.equal(refined.mime, "application/pdf");
 });
 
+test("a stored uuid name loses to the filename the customer sent", () => {
+  const file = describeInboundFile({
+    type: "document",
+    filename: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+    message: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+    document: { filename: "FinalABISProShop - Manish nagar - Copy.xlsx" },
+    media_url: "https://cdn.example/78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+  });
+  assert.equal(file.filename, "FinalABISProShop - Manish nagar - Copy.xlsx");
+  assert.equal(file.ext, "xlsx");
+  assert.equal(file.caption, "");
+  const kept = refineFileFromBytes(file, new Uint8Array([0x25, 0x50, 0x44, 0x46]));
+  assert.equal(kept.filename, "FinalABISProShop - Manish nagar - Copy.xlsx");
+});
+
 test("a WhatsApp document without a filename is still a file, not a link", () => {
   const file = describeInboundFile({
     type: "document",

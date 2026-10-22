@@ -20,6 +20,7 @@ import {
   contentTypeFor,
   describeSlackFile,
   FILE_TYPES_NOTE,
+  isStorageName,
   maxBytes,
   parseVcf,
   refineFileFromBytes,
@@ -30,6 +31,24 @@ import {
 import { publishHome } from "./home.js";
 
 const TEMPLATE_FIRST = "WhatsApp won't deliver a free-form reply until they message you. Send another template from the WhatsApp Home tab.";
+
+function fileFields(data) {
+  const lines = [];
+  const walk = (value, path, depth) => {
+    if (depth > 4 || value == null || lines.length > 30) return;
+    if (typeof value === "string") {
+      if (/file|name|caption|message/i.test(path) && !/^https?:/i.test(value)) lines.push(`${path}=${value.slice(0, 80)}`);
+      return;
+    }
+    if (typeof value !== "object" || Array.isArray(value)) return;
+    for (const [key, child] of Object.entries(value)) {
+      if (key === "contact" || key === "contacts") continue;
+      walk(child, path ? `${path}.${key}` : key, depth + 1);
+    }
+  };
+  walk(data, "", 0);
+  return lines.join(" | ");
+}
 
 async function refreshHome(userId, deps) {
   if (!userId) return;
@@ -99,6 +118,9 @@ async function onReceived(payload, deps) {
   }
   const existing = await deps.store.getContact(phone);
   const view = formatInbound(data);
+  if (view.file && isStorageName(view.file.filename)) {
+    deps.log.info?.(`[bridge] inbound file has no customer name (${view.file.filename}); fields ${fileFields(data)}`);
+  }
   const assignee = await assigneeForNewInbound(existing, deps);
   const contact = await ensureChannel(
     phone,
@@ -289,6 +311,7 @@ async function prepareInbound(view, deps) {
   try {
     const file = await loadInboundFile(view.file, deps);
     let body = view.body;
+    if (!body || body === view.file.filename || isStorageName(body)) body = file.caption || file.filename;
     if (file.kind === "contact") {
       const parsed = parseVcf(file.vcf || new TextDecoder().decode(file.bytes));
       if (parsed.length) {

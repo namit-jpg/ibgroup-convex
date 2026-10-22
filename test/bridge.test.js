@@ -137,6 +137,19 @@ test("supported files are described without a link", () => {
   assert.equal(clip.file, null);
   assert.equal(clip.link, "https://cdn.example/walk.mp4");
 
+  const named = formatInbound({
+    type: "document",
+    filename: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+    message: "78fb2b91-124e-4965-b22b-b08ff4f34b2c.bin",
+    document: { filename: "FinalABISProShop - Manish nagar - Copy.xlsx" },
+    media_url: "https://cdn.example/sheet.bin",
+    phone: "+919812345678",
+    contact: { name: "Deepu", phone: "+919812345678" },
+  });
+  assert.equal(named.file.filename, "FinalABISProShop - Manish nagar - Copy.xlsx");
+  assert.equal(named.body, "FinalABISProShop - Manish nagar - Copy.xlsx");
+  assert.equal(named.link, "");
+
   const unnamed = formatInbound({
     type: "document",
     phone: "+919812345678",

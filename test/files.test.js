@@ -3,12 +3,14 @@ import test from "node:test";
 import {
   classifyFile,
   contactBody,
+  contentDisposition,
   describeInboundFile,
   describeSlackFile,
   parseVcf,
   refineFileFromBytes,
   sniffBytes,
   vcfFromContacts,
+  whatsappContentType,
   whatsappMediaType,
 } from "../convex/lib/files.js";
 
@@ -24,6 +26,9 @@ test("office files, pictures, and contact cards are the allowed kinds", () => {
   assert.equal(classifyFile({ name: "photo.jpeg", mimetype: "image/jpeg" }).kind, "image");
   assert.equal(classifyFile({ name: "scan.gif" }).ext, "gif");
   assert.equal(classifyFile({ name: "shot.heic", mimetype: "image/heic" }).kind, "image");
+  assert.deepEqual(classifyFile({ name: "deck.pptx" }), { kind: "document", ext: "pptx" });
+  assert.deepEqual(classifyFile({ name: "deck.ppt", mimetype: "application/vnd.ms-powerpoint" }), { kind: "document", ext: "ppt" });
+  assert.deepEqual(classifyFile({ name: "shops.csv", mimetype: "text/csv" }), { kind: "document", ext: "csv" });
   assert.equal(classifyFile({ name: "clip.mp4", mimetype: "video/mp4" }), null);
   assert.equal(classifyFile({ name: "bundle.zip" }), null);
 
@@ -32,6 +37,13 @@ test("office files, pictures, and contact cards are the allowed kinds", () => {
   assert.equal(whatsappMediaType(classifyFile({ name: "anim.gif" })), "document");
   assert.equal(whatsappMediaType(classifyFile({ name: "invoice.pdf" })), "document");
   assert.equal(whatsappMediaType(classifyFile({ name: "card.vcf" })), "contacts");
+});
+
+test("a download keeps the original filename", () => {
+  const header = contentDisposition("FinalABISProShop - khamla.csv");
+  assert.match(header, /filename="FinalABISProShop - khamla\.csv"/);
+  assert.equal(whatsappContentType("csv", "text/csv"), "text/plain");
+  assert.equal(whatsappContentType("pptx"), "application/vnd.openxmlformats-officedocument.presentationml.presentation");
 });
 
 test("a slack file keeps its name and private link", () => {

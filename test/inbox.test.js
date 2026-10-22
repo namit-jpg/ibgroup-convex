@@ -92,6 +92,13 @@ test("a channel reply sends WhatsApp only after the customer has written", async
     deps,
   );
   assert.deepEqual(sent, [{ to: "919812345678", text: "On the way" }]);
+
+  deps.slack.userName = async () => "Namit D";
+  await handleSlackMessage(
+    { eventId: "Ev1b", message: { channel, ts: "2.2", user: "U_NAMIT", text: "Sending the sheet" } },
+    deps,
+  );
+  assert.equal(sent.at(-1).text, "Namit D: Sending the sheet");
 });
 
 test("opt-out blocks a later channel reply", async () => {
@@ -310,6 +317,8 @@ test("a channel file is sent to WhatsApp as the file, not as a link", async () =
           { name: "photo.png", mimetype: "image/png", url_private_download: "https://files.slack.com/photo.png", size: 4 },
           { name: "anim.gif", mimetype: "image/gif", url_private_download: "https://files.slack.com/anim.gif", size: 4 },
           { name: "card.vcf", mimetype: "text/vcard", url_private_download: "https://files.slack.com/card.vcf", size: 80 },
+          { name: "deck.pptx", mimetype: "application/vnd.openxmlformats-officedocument.presentationml.presentation", url_private_download: "https://files.slack.com/deck.pptx", size: 4 },
+          { name: "shops.csv", mimetype: "text/csv", url_private_download: "https://files.slack.com/shops.csv", size: 4 },
           { name: "skip.zip", mimetype: "application/zip", url_private_download: "https://files.slack.com/skip.zip", size: 4 },
         ],
       },
@@ -326,6 +335,8 @@ test("a channel file is sent to WhatsApp as the file, not as a link", async () =
       ["document", "c.xlsx", "", "https://files.example/c.xlsx"],
       ["image", "photo.png", "", "https://files.example/photo.png"],
       ["document", "anim.gif", "", "https://files.example/anim.gif"],
+      ["document", "deck.pptx", "", "https://files.example/deck.pptx"],
+      ["document", "shops.csv", "", "https://files.example/shops.csv"],
     ],
   );
   assert.equal(contacts.length, 1);

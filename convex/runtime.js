@@ -1,5 +1,6 @@
 import { internal } from "./_generated/api";
 import { loadConfig } from "./lib/config.js";
+import { whatsappContentType } from "./lib/files.js";
 import { createSendvise, createTemplateSource } from "./lib/sendvise.js";
 import { createSlack } from "./lib/slack.js";
 
@@ -56,8 +57,8 @@ export function makeDeps(ctx) {
           contentType: (res.headers.get("content-type") || "").split(";")[0].trim(),
         };
       },
-      async publish(bytes, { contentType } = {}) {
-        const type = contentType || "application/octet-stream";
+      async publish(bytes, { filename, ext, contentType } = {}) {
+        const type = whatsappContentType(ext, contentType);
         const uploadUrl = await ctx.runMutation(internal.store.makeUploadUrl, {});
         const body = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
         const res = await fetch(uploadUrl, {
@@ -68,6 +69,8 @@ export function makeDeps(ctx) {
         if (!res.ok) throw new Error(`Could not store the file (${res.status})`);
         const stored = await res.json().catch(() => ({}));
         if (!stored.storageId) throw new Error("Could not store the file");
+        const name = encodeURIComponent(filename || "file");
+        if (config.publicBaseUrl) return `${config.publicBaseUrl}/files/${stored.storageId}/${name}`;
         const url = await ctx.runQuery(internal.store.publicFileUrl, { storageId: stored.storageId });
         if (!url) throw new Error("Could not publish the file");
         return url;

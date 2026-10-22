@@ -42,3 +42,27 @@ test("Slack file uploads send raw bytes as octet-stream so Word stays Word", asy
   const finished = calls.find((call) => call.href.endsWith("files.completeUploadExternal"));
   assert.equal(JSON.parse(finished.opts.body).files[0].title, "po.docx");
 });
+
+test("Slack user lookup is form encoded so the sender name is returned", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, opts = {}) => {
+    const href = String(url);
+    if (href.endsWith("users.info")) {
+      const body = new URLSearchParams(opts.body);
+      if (body.get("user") !== "U1") {
+        return { json: async () => ({ ok: false, error: "user_not_found" }) };
+      }
+      return {
+        json: async () => ({ ok: true, user: { profile: { display_name: "Namit D", real_name: "Namit Dasappanavar" } } }),
+      };
+    }
+    return { json: async () => ({ ok: false, error: "unexpected" }) };
+  };
+  try {
+    const slack = createSlack("xoxb-test");
+    assert.equal(await slack.userName("U1"), "Namit D");
+    assert.equal(await slack.userName("U1"), "Namit D");
+  } finally {
+    globalThis.fetch = original;
+  }
+});

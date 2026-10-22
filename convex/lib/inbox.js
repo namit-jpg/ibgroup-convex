@@ -19,6 +19,7 @@ import {
   contactBody,
   contentTypeFor,
   describeSlackFile,
+  whatsappContentType,
   FILE_TYPES_NOTE,
   isStorageName,
   maxBytes,
@@ -97,7 +98,7 @@ async function ensureChannel(phone, { name, inviteUserIds, assigneeUserId, origi
   await deps.slack.setPurpose?.(channelId, `WhatsApp +${phone}`, deps.config.slackTeamId);
   const who = name || "WhatsApp contact";
   const intro = origin === "inbound"
-    ? `*${who}* · \`+${phone}\`\n${assigneeUserId ? `<@${assigneeUserId}> this one is yours. ` : ""}Reply in this channel and it goes to WhatsApp, including images, PDF, Word, Excel, and contact cards.`
+    ? `*${who}* · \`+${phone}\`\n${assigneeUserId ? `<@${assigneeUserId}> this one is yours. ` : ""}Reply in this channel and it goes to WhatsApp, including images, PDF, Word, Excel, PowerPoint, CSV, and contact cards.`
     : `*${who}* · \`+${phone}\`\nThis chat was started with a template. Their reply will show up here. Answer in this channel after they write back. Until then, send another template from the WhatsApp Home tab.`;
   await deps.slack.postMessage({ channel: channelId, text: intro });
   return await deps.store.getContact(phone);
@@ -399,6 +400,20 @@ async function rememberSend(contact, message, preview, data, deps) {
   });
 }
 
+function withSender(name, text) {
+  const who = String(name || "").trim();
+  const body = String(text || "").trim();
+  if (!who) return body;
+  if (!body) return who;
+  if (body === who || body.startsWith(`${who}:`) || body.startsWith(`${who}\n`)) return body;
+  return `${who}: ${body}`;
+}
+
+async function senderName(message, deps) {
+  if (!deps.slack.userName) return "";
+  return deps.slack.userName(message.user);
+}
+
 async function deliverText(contact, message, text, deps) {
   const data = await deps.sendvise.sendText(contact.phone, text);
   await rememberSend(contact, message, text, data, deps);
@@ -429,7 +444,8 @@ async function publishAndSend(phone, file, bytes, caption, contentType, deps) {
   if (!deps.files?.publish || !deps.sendvise.sendMedia) throw new Error(`Couldn't send ${file.filename} to WhatsApp`);
   const mediaUrl = await deps.files.publish(bytes, {
     filename: file.filename,
-    contentType: contentTypeFor(file.ext, contentType || file.mime),
+    ext: file.ext,
+    contentType: whatsappContentType(file.ext, contentType || file.mime),
   });
   return deps.sendvise.sendMedia(phone, {
     type: whatsappMediaType(file),
@@ -471,11 +487,14 @@ export async function handleSlackMessage({ message, eventId }, deps) {
       return;
     }
 
+    const sender = await senderName(message, deps);
     let caption = "";
-    if (text && accepted.length && text.length <= 1024) caption = text;
-    else if (text) await deliverText(contact, message, text, deps);
+    const signed = withSender(sender, text);
+    if (text && accepted.length && signed.length <= 1024) caption = signed;
+    else if (text) await deliverText(contact, message, signed, deps);
     for (let i = 0; i < accepted.length; i += 1) {
-      await deliverFile(contact, message, accepted[i], i === 0 ? caption : "", deps);
+      const fileCaption = i === 0 ? caption || withSender(sender, "") : "";
+      await deliverFile(contact, message, accepted[i], fileCaption, deps);
     }
     await deps.store.upsertContact(contact.phone, {
       lastMessage: text || accepted.map((file) => file.filename).join(", "),

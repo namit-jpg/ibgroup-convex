@@ -1,5 +1,5 @@
 export const FILE_TYPES_NOTE =
-  "WhatsApp can take images, PDF, Word (.docx), Excel (.xlsx), and contact cards (.vcf).";
+  "WhatsApp can take images, PDF, Word (.docx), Excel (.xlsx), PowerPoint (.ppt, .pptx), CSV, and contact cards (.vcf).";
 
 const IMAGE_EXT = new Set([
   "jpg",
@@ -23,7 +23,7 @@ const IMAGE_EXT = new Set([
   "jp2",
   "jxl",
 ]);
-const DOCUMENT_EXT = new Set(["pdf", "docx", "xlsx"]);
+const DOCUMENT_EXT = new Set(["pdf", "docx", "xlsx", "ppt", "pptx", "csv"]);
 const INLINE_IMAGE_EXT = new Set(["jpg", "jpeg", "jpe", "jfif", "pjpeg", "pjp", "png"]);
 
 const EXT_MIME = {
@@ -50,6 +50,9 @@ const EXT_MIME = {
   pdf: "application/pdf",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  csv: "text/plain",
   vcf: "text/vcard",
 };
 
@@ -74,6 +77,11 @@ const MIME_EXT = {
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "text/csv": "csv",
+  "application/csv": "csv",
+  "text/comma-separated-values": "csv",
   "text/vcard": "vcf",
   "text/x-vcard": "vcf",
   "text/directory": "vcf",
@@ -127,6 +135,17 @@ export function contentTypeFor(ext, mime = "") {
   const clean = cleanMime(mime);
   if (clean && !GENERIC_MIME.has(clean)) return clean;
   return EXT_MIME[ext] || "application/octet-stream";
+}
+
+export function whatsappContentType(ext, mime = "") {
+  if (ext === "csv") return "text/plain";
+  return contentTypeFor(ext, mime);
+}
+
+export function contentDisposition(filename) {
+  const safe = String(filename || "file").replace(/["\r\n]/g, "");
+  const ascii = safe.replace(/[^\x20-\x7e]/g, "_") || "file";
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(safe)}`;
 }
 
 function startsWith(bytes, signature) {

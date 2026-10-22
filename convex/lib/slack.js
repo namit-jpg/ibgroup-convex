@@ -31,26 +31,9 @@ export function createSlack(token, log = console) {
     return json;
   }
 
-  const names = new Map();
-
   return {
     postMessage(args) {
       return api("chat.postMessage", { unfurl_links: true, unfurl_media: false, ...args });
-    },
-    async userName(userId) {
-      if (!userId) return "";
-      if (names.has(userId)) return names.get(userId);
-      try {
-        const info = await api("users.info", { user: userId }, { form: true });
-        const profile = info.user?.profile || {};
-        const name = profile.display_name || profile.real_name || info.user?.real_name || info.user?.name || "";
-        names.set(userId, name);
-        return name;
-      } catch (err) {
-        log.error?.(`[bridge] slack user name failed: ${err.message}`);
-        names.set(userId, "");
-        return "";
-      }
     },
     async download(url) {
       let host = "";

@@ -232,14 +232,18 @@ export function refineFileFromBytes(file, bytes) {
   } catch {
     sniffed = null;
   }
-  if (!sniffed || !genericExtension(file.filename)) return { ...file, bytes };
+  if (!genericExtension(file.filename)) return { ...file, bytes };
+  const known = String(file.ext || "").toLowerCase();
+  const fromMime = extFromMime(file.mime);
+  const ext = sniffed?.ext || (known && known !== "bin" && known !== "octet" ? known : fromMime);
+  if (!ext || !EXT_MIME[ext]) return { ...file, bytes };
   return {
     ...file,
     bytes,
-    kind: sniffed.kind,
-    ext: sniffed.ext,
-    filename: replaceExtension(file.filename, sniffed.ext, `file.${sniffed.ext}`),
-    mime: EXT_MIME[sniffed.ext] || file.mime,
+    kind: sniffed?.kind || file.kind,
+    ext,
+    filename: replaceExtension(file.filename, ext, `file.${ext}`),
+    mime: sniffed ? EXT_MIME[ext] || file.mime : contentTypeFor(ext, file.mime),
   };
 }
 

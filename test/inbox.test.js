@@ -92,13 +92,6 @@ test("a channel reply sends WhatsApp only after the customer has written", async
     deps,
   );
   assert.deepEqual(sent, [{ to: "919812345678", text: "On the way" }]);
-
-  deps.slack.userName = async () => "Namit D";
-  await handleSlackMessage(
-    { eventId: "Ev1b", message: { channel, ts: "2.2", user: "U_NAMIT", text: "Sending the sheet" } },
-    deps,
-  );
-  assert.equal(sent.at(-1).text, "Namit D: Sending the sheet");
 });
 
 test("opt-out blocks a later channel reply", async () => {

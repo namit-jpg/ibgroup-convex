@@ -65,6 +65,7 @@ test("magic bytes recover the real type when the CDN has no name", () => {
   assert.deepEqual(sniffBytes(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), { kind: "image", ext: "png" });
   assert.deepEqual(sniffBytes(officeZip("wordprocessingml.document")), { kind: "document", ext: "docx" });
   assert.deepEqual(sniffBytes(officeZip("xl/workbook.xml spreadsheetml")), { kind: "document", ext: "xlsx" });
+  assert.deepEqual(sniffBytes(officeZip("ppt/presentation.xml presentationml")), { kind: "document", ext: "pptx" });
   const refined = refineFileFromBytes(
     { filename: "file", ext: "", mime: "application/octet-stream", kind: "document" },
     new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31]),
@@ -72,6 +73,24 @@ test("magic bytes recover the real type when the CDN has no name", () => {
   assert.equal(refined.filename, "file.pdf");
   assert.equal(refined.ext, "pdf");
   assert.equal(refined.mime, "application/pdf");
+});
+
+test("a storage bin name takes csv when the type is already known", () => {
+  const described = describeInboundFile({
+    type: "document",
+    filename: "6d65b48b-1111-4111-8111-111111111111.bin",
+    message: "6d65b48b-1111-4111-8111-111111111111.bin",
+    mime_type: "text/csv",
+    media_url: "https://cdn.example/6d65b48b-1111-4111-8111-111111111111.bin",
+  });
+  const refined = refineFileFromBytes(described, new TextEncoder().encode("shop,city\nKhamla,Nagpur\n"));
+  assert.equal(refined.filename, "6d65b48b-1111-4111-8111-111111111111.csv");
+  assert.equal(refined.ext, "csv");
+  const named = refineFileFromBytes(
+    { filename: "FinalABISProShop - khamla.csv", ext: "csv", mime: "text/csv", kind: "document" },
+    new TextEncoder().encode("shop,city\n"),
+  );
+  assert.equal(named.filename, "FinalABISProShop - khamla.csv");
 });
 
 test("a stored uuid name loses to the filename the customer sent", () => {

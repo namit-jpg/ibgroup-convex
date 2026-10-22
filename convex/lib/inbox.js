@@ -400,20 +400,6 @@ async function rememberSend(contact, message, preview, data, deps) {
   });
 }
 
-function withSender(name, text) {
-  const who = String(name || "").trim();
-  const body = String(text || "").trim();
-  if (!who) return body;
-  if (!body) return who;
-  if (body === who || body.startsWith(`${who}:`) || body.startsWith(`${who}\n`)) return body;
-  return `${who}: ${body}`;
-}
-
-async function senderName(message, deps) {
-  if (!deps.slack.userName) return "";
-  return deps.slack.userName(message.user);
-}
-
 async function deliverText(contact, message, text, deps) {
   const data = await deps.sendvise.sendText(contact.phone, text);
   await rememberSend(contact, message, text, data, deps);
@@ -487,14 +473,11 @@ export async function handleSlackMessage({ message, eventId }, deps) {
       return;
     }
 
-    const sender = await senderName(message, deps);
     let caption = "";
-    const signed = withSender(sender, text);
-    if (text && accepted.length && signed.length <= 1024) caption = signed;
-    else if (text) await deliverText(contact, message, signed, deps);
+    if (text && accepted.length && text.length <= 1024) caption = text;
+    else if (text) await deliverText(contact, message, text, deps);
     for (let i = 0; i < accepted.length; i += 1) {
-      const fileCaption = i === 0 ? caption || withSender(sender, "") : "";
-      await deliverFile(contact, message, accepted[i], fileCaption, deps);
+      await deliverFile(contact, message, accepted[i], i === 0 ? caption : "", deps);
     }
     await deps.store.upsertContact(contact.phone, {
       lastMessage: text || accepted.map((file) => file.filename).join(", "),
